@@ -89,6 +89,9 @@ pub struct EnvVars {
     /// Set by the flag `GRAPH_ETHEREUM_GENESIS_BLOCK_NUMBER`. The default value
     /// is 0.
     pub genesis_block_number: u64,
+    // Set by the environment variable
+    // `DATADOG_AGENT_ENDPOINT`. The default value is http://localhost:8126
+    pub datadog_agent_endpoint: String,
 }
 
 // This does not print any values avoid accidentally leaking any sensitive env vars
@@ -131,6 +134,7 @@ impl From<Inner> for EnvVars {
             cleanup_blocks: x.cleanup_blocks.0,
             target_triggers_per_block_range: x.target_triggers_per_block_range,
             genesis_block_number: x.genesis_block_number,
+            datadog_agent_endpoint: x.datadog_agent_endpoint,
         }
     }
 }
@@ -181,4 +185,6 @@ struct Inner {
     target_triggers_per_block_range: u64,
     #[envconfig(from = "GRAPH_ETHEREUM_GENESIS_BLOCK_NUMBER", default = "0")]
     genesis_block_number: u64,
+    #[envconfig(from = "DATADOG_AGENT_ENDPOINT", default = "http://localhost:8126")]
+    datadog_agent_endpoint: String,
 }

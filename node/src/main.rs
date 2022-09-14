@@ -40,6 +40,12 @@ use graph_server_metrics::PrometheusMetricsServer;
 use graph_server_websocket::SubscriptionServer as GraphQLSubscriptionServer;
 use graph_store_postgres::{register_jobs as register_store_jobs, ChainHeadUpdateListener, Store};
 use near::NearStreamBuilder;
+use opentelemetry::global::shutdown_tracer_provider;
+use opentelemetry::{
+    trace::{TraceContextExt, Tracer},
+    Key,
+};
+use opentelemetry_datadog::{new_pipeline, ApiVersion};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -92,8 +98,13 @@ fn read_expensive_queries(
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), opentelemetry::trace::TraceError> {
     env_logger::init();
+
+    let tracer = new_pipeline()
+        .with_service_name("graph-node")
+        .with_version(ApiVersion::Version05)
+        .install_simple()?;
 
     let opt = opt::Opt::from_args();
 
@@ -537,12 +548,16 @@ async fn main() {
         }
 
         // Serve GraphQL queries over HTTP
-        graph::spawn(
-            graphql_server
-                .serve(http_port, ws_port)
-                .expect("Failed to start GraphQL query server")
-                .compat(),
-        );
+        tracer.in_span("graphql_server", |cx| {
+            let span = cx.span();
+            span.set_attribute(Key::new("span.type").string("web"));
+            graph::spawn(
+                graphql_server
+                    .serve(http_port, ws_port)
+                    .expect("Failed to start GraphQL query server")
+                    .compat(),
+            );
+        });
 
         // Serve GraphQL subscriptions over WebSockets
         graph::spawn(subscription_server.serve(ws_port));
@@ -598,8 +613,9 @@ async fn main() {
             }
         }
     });
-
     futures::future::pending::<()>().await;
+    shutdown_tracer_provider();
+    Ok(())
 }
 
 /// Return the hashmap of Arweave chains and also add them to `blockchain_map`.

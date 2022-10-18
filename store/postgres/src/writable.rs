@@ -575,7 +575,7 @@ impl Queue {
                     Ok(Err(e)) => {
                         error!(logger, "Subgraph writer failed"; "error" => e.to_string());
                         queue.record_err(e);
-                        panic!("Failed");
+                        return;
                     }
                     Err(e) => {
                         error!(logger, "Subgraph writer paniced"; "error" => e.to_string());

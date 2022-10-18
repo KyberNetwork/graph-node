@@ -13,6 +13,7 @@ use graph::prelude::{
     BLOCK_NUMBER_MAX,
 };
 use graph::slog::info;
+use graph::tokio::process;
 use graph::util::bounded_queue::BoundedQueue;
 use graph::{
     cheap_clone::CheapClone,
@@ -22,7 +23,7 @@ use graph::{
         BlockPtr, DeploymentHash, EntityModification, Error, Logger, StopwatchMetrics, StoreError,
         StoreEvent, UnfailOutcome, ENV_VARS,
     },
-    slog::{debug, error, trace, warn},
+    slog::{debug, error, warn},
     util::backoff::ExponentialBackoff,
 };
 use store::StoredDynamicDataSource;
@@ -455,8 +456,9 @@ impl Request {
                 offchain_to_remove,
             } => {
                 if mods.len() > 0 {
+                    debug!(logger, "Request Execute..."; "at_block" => block_ptr_to.number);
                     for single_mod in mods {
-                        trace!(logger, "Modification explain"; "modification=" => format!("{:?}", single_mod));
+                        debug!(logger, "Modification explain"; "modification=" => format!("{:?}", single_mod));
                     }
                 }
                 store.transact_block_operations(
@@ -574,7 +576,7 @@ impl Queue {
                     Ok(Err(e)) => {
                         error!(logger, "Subgraph writer failed"; "error" => e.to_string());
                         queue.record_err(e);
-                        return;
+                        panic!("Failed");
                     }
                     Err(e) => {
                         error!(logger, "Subgraph writer paniced"; "error" => e.to_string());

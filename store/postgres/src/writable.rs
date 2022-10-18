@@ -13,7 +13,6 @@ use graph::prelude::{
     BLOCK_NUMBER_MAX,
 };
 use graph::slog::info;
-use graph::tokio::process;
 use graph::util::bounded_queue::BoundedQueue;
 use graph::{
     cheap_clone::CheapClone,

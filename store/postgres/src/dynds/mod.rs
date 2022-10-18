@@ -9,7 +9,7 @@ use graph::{
     blockchain::BlockPtr,
     components::store::StoredDynamicDataSource,
     constraint_violation,
-    prelude::{warn, BlockNumber, StoreError},
+    prelude::{BlockNumber, StoreError},
     slog::Logger,
 };
 

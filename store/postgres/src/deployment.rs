@@ -2,11 +2,9 @@
 //! into these methods must be for the shard that holds the actual
 //! deployment data and metadata
 use crate::{detail::GraphNodeVersion, primary::DeploymentId};
-use diesel::debug_query;
 use diesel::{
     connection::SimpleConnection,
     dsl::{count, delete, insert_into, select, sql, update},
-    query_builder::{AsQuery, QueryFragment},
     sql_types::Integer,
 };
 use diesel::{expression::SqlLiteral, pg::PgConnection, sql_types::Numeric};
@@ -15,6 +13,10 @@ use diesel::{
     sql_query,
     sql_types::{Nullable, Text},
 };
+use graph::prelude::{
+    anyhow, bigdecimal::ToPrimitive, hex, web3::types::H256, BigDecimal, BlockNumber, BlockPtr,
+    DeploymentHash, DeploymentState, Schema, StoreError,
+};
 use graph::{blockchain::block_stream::FirehoseCursor, data::subgraph::schema::SubgraphError};
 use graph::{
     data::subgraph::{
@@ -22,13 +24,6 @@ use graph::{
         SubgraphFeature,
     },
     slog::Logger,
-};
-use graph::{
-    prelude::{
-        anyhow, bigdecimal::ToPrimitive, hex, web3::types::H256, BigDecimal, BlockNumber, BlockPtr,
-        DeploymentHash, DeploymentState, Schema, StoreError,
-    },
-    slog::warn,
 };
 use stable_hash_legacy::crypto::SetHasher;
 use std::{collections::BTreeSet, convert::TryFrom, ops::Bound};
@@ -301,7 +296,7 @@ pub fn set_manifest_raw_yaml(
 }
 
 pub fn transact_block(
-    logger: &Logger,
+    _logger: &Logger,
     conn: &PgConnection,
     site: &Site,
     ptr: &BlockPtr,

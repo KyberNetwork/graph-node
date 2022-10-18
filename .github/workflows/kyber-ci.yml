@@ -15,6 +15,7 @@ env:
 jobs:
   unit-tests:
     name: Run unit tests
+    if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -192,6 +193,7 @@ jobs:
 
   rustfmt:
     name: Check rustfmt style
+    if: github.event_name == 'pull_request'
     strategy:
       matrix:
         rust: ["stable"]

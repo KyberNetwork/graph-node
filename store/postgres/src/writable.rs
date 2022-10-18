@@ -456,7 +456,7 @@ impl Request {
                 offchain_to_remove,
             } => {
                 if mods.len() > 0 {
-                    debug!(logger, "Request Execute..."; "at_block" => block_ptr_to.number);
+                    warn!(logger, "Request Execute..."; "at_block" => block_ptr_to.number);
                     for single_mod in mods {
                         debug!(logger, "Modification explain"; "modification=" => format!("{:?}", single_mod));
                     }

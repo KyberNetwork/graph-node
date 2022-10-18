@@ -755,9 +755,10 @@ impl Layout {
             .collect();
 
         let section = stopwatch.start_section("update_modification_clamp_range_query");
-        ClampRangeQuery::new(table, &entity_keys, block)?.execute(conn)?;
+        let clamp_range_query = ClampRangeQuery::new(table, &entity_keys, block)?;
+        debug!(logger, "Clamp_Range_Query"; "Table" => table.name.as_str(), "query" => format!("{}", debug_query(&clamp_range_query)));
+        clamp_range_query.execute(conn)?;
         section.end();
-
         let _section = stopwatch.start_section("update_modification_insert_query");
         let mut count = 0;
 

@@ -337,6 +337,8 @@ impl DeploymentStore {
             }
         }
 
+        // warn!(self.logger, "++++ EntityInsertion count"; "cnt=" => inserts.len());
+
         // Apply modification groups.
         // Inserts:
         for (entity_type, mut entities) in inserts.into_iter() {
@@ -382,7 +384,15 @@ impl DeploymentStore {
         section.end();
 
         let _section = stopwatch.start_section("apply_entity_modifications_insert");
-        layout.insert(conn, entity_type, data, block_number(ptr), stopwatch)
+
+        layout.insert(
+            &self.logger,
+            conn,
+            entity_type,
+            data,
+            block_number(ptr),
+            stopwatch,
+        )
     }
 
     fn overwrite_entities<'a>(
@@ -402,7 +412,15 @@ impl DeploymentStore {
         section.end();
 
         let _section = stopwatch.start_section("apply_entity_modifications_update");
-        layout.update(conn, entity_type, data, block_number(ptr), stopwatch)
+
+        layout.update(
+            &self.logger,
+            conn,
+            entity_type,
+            data,
+            block_number(ptr),
+            stopwatch,
+        )
     }
 
     fn remove_entities(
@@ -1088,6 +1106,7 @@ impl DeploymentStore {
             section.end();
 
             dynds::insert(
+                &self.logger,
                 &conn,
                 &site,
                 data_sources,
@@ -1107,6 +1126,7 @@ impl DeploymentStore {
             }
 
             deployment::transact_block(
+                &self.logger,
                 &conn,
                 &site,
                 block_ptr_to,

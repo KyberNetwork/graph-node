@@ -19,6 +19,7 @@ use graph::prelude::{
     EntityFilter, EntityLink, EntityOrder, EntityRange, EntityWindow, ParentLink,
     QueryExecutionError, StoreError, Value, ENV_VARS,
 };
+use graph::slog::{warn, Logger};
 use graph::{
     components::store::{AttributeNames, EntityType},
     data::{schema::FulltextAlgorithm, store::scalar},
@@ -1645,14 +1646,15 @@ impl<'a, Conn> RunQueryDsl<Conn> for FindManyQuery<'a> {}
 
 #[derive(Debug)]
 pub struct InsertQuery<'a> {
-    table: &'a Table,
-    entities: &'a [(&'a EntityKey, Cow<'a, Entity>)],
-    unique_columns: Vec<&'a Column>,
-    br_column: BlockRangeColumn<'a>,
+    pub table: &'a Table,
+    pub entities: &'a [(&'a EntityKey, Cow<'a, Entity>)],
+    pub unique_columns: Vec<&'a Column>,
+    pub br_column: BlockRangeColumn<'a>,
 }
 
 impl<'a> InsertQuery<'a> {
     pub fn new(
+        logger: &Logger,
         table: &'a Table,
         entities: &'a mut [(&'a EntityKey, Cow<Entity>)],
         block: BlockNumber,
@@ -1666,9 +1668,9 @@ impl<'a> InsertQuery<'a> {
                         .cloned()
                         .collect::<Vec<Value>>();
                     if !fulltext_field_values.is_empty() {
-                        entity
-                            .to_mut()
-                            .insert(column.field.to_string(), Value::List(fulltext_field_values));
+                        let field = column.field.to_string();
+                        let value = Value::List(fulltext_field_values);
+                        entity.to_mut().insert(field, value);
                     }
                 }
                 if !column.is_nullable() && !entity.contains_key(&column.field) {

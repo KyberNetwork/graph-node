@@ -12,6 +12,7 @@ use graph::{
     components::store::StoredDynamicDataSource,
     constraint_violation,
     prelude::{serde_json, BlockNumber, StoreError},
+    slog::Logger,
 };
 
 use crate::primary::Namespace;
@@ -135,12 +136,12 @@ impl DataSourcesTable {
 
     pub(crate) fn insert(
         &self,
+        _logger: &Logger,
         conn: &PgConnection,
         data_sources: &[StoredDynamicDataSource],
         block: BlockNumber,
     ) -> Result<usize, StoreError> {
         let mut inserted_total = 0;
-
         for ds in data_sources {
             let StoredDynamicDataSource {
                 manifest_idx,

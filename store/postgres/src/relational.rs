@@ -24,6 +24,7 @@ use graph::data::graphql::TypeExt as _;
 use graph::data::query::Trace;
 use graph::data::value::Word;
 use graph::prelude::{q, s, StopwatchMetrics, ENV_VARS};
+use graph::slog::trace;
 use graph::slog::warn;
 use inflector::Inflector;
 use lazy_static::lazy_static;
@@ -586,6 +587,7 @@ impl Layout {
 
     pub fn insert<'a>(
         &'a self,
+        logger: &Logger,
         conn: &PgConnection,
         entity_type: &'a EntityType,
         entities: &'a mut [(&'a EntityKey, Cow<'a, Entity>)],
@@ -601,9 +603,9 @@ impl Layout {
         // We add 1 to account for the `block_range` bind parameter
         let chunk_size = POSTGRES_MAX_PARAMETERS / (table.columns.len() + 1);
         for chunk in entities.chunks_mut(chunk_size) {
-            count += InsertQuery::new(table, chunk, block)?
-                .get_results(conn)
-                .map(|ids| ids.len())?
+            let query = InsertQuery::new(logger, table, chunk, block)?;
+            trace!(logger, "Insert Query"; "query" => format!("{}", debug_query(&query)));
+            count += query.get_results(conn).map(|ids| ids.len())?
         }
         Ok(count)
     }
@@ -726,6 +728,7 @@ impl Layout {
 
     pub fn update<'a>(
         &'a self,
+        logger: &Logger,
         conn: &PgConnection,
         entity_type: &'a EntityType,
         entities: &'a mut [(&'a EntityKey, Cow<'a, Entity>)],
@@ -764,7 +767,9 @@ impl Layout {
         // We add 1 to account for the `block_range` bind parameter
         let chunk_size = POSTGRES_MAX_PARAMETERS / (table.columns.len() + 1);
         for chunk in entities.chunks_mut(chunk_size) {
-            count += InsertQuery::new(table, chunk, block)?.execute(conn)?;
+            let query = InsertQuery::new(logger, table, chunk, block)?;
+            trace!(logger, "Update Query"; "query" => format!("{}", debug_query(&query)));
+            count += query.execute(conn)?;
         }
         Ok(count)
     }

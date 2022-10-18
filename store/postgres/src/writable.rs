@@ -22,7 +22,7 @@ use graph::{
         BlockPtr, DeploymentHash, EntityModification, Error, Logger, StopwatchMetrics, StoreError,
         StoreEvent, UnfailOutcome, ENV_VARS,
     },
-    slog::{error, warn},
+    slog::{debug, error, trace, warn},
     util::backoff::ExponentialBackoff,
 };
 use store::StoredDynamicDataSource;
@@ -441,7 +441,7 @@ enum Request {
 }
 
 impl Request {
-    fn execute(&self) -> Result<(), StoreError> {
+    fn execute(&self, logger: &Logger) -> Result<(), StoreError> {
         match self {
             Request::Write {
                 store,
@@ -453,16 +453,23 @@ impl Request {
                 deterministic_errors,
                 manifest_idx_and_name,
                 offchain_to_remove,
-            } => store.transact_block_operations(
-                block_ptr_to,
-                firehose_cursor,
-                mods,
-                stopwatch,
-                data_sources,
-                deterministic_errors,
-                manifest_idx_and_name,
-                offchain_to_remove,
-            ),
+            } => {
+                if mods.len() > 0 {
+                    for single_mod in mods {
+                        trace!(logger, "Modification explain"; "modification=" => format!("{:?}", single_mod));
+                    }
+                }
+                store.transact_block_operations(
+                    block_ptr_to,
+                    firehose_cursor,
+                    mods,
+                    stopwatch,
+                    data_sources,
+                    deterministic_errors,
+                    manifest_idx_and_name,
+                    offchain_to_remove,
+                )
+            }
             Request::RevertTo {
                 store,
                 block_ptr,
@@ -550,9 +557,11 @@ impl Queue {
                     let _section = queue.stopwatch.start_section("queue_wait");
                     queue.queue.peek().await
                 };
+
                 let res = {
                     let _section = queue.stopwatch.start_section("queue_execute");
-                    graph::spawn_blocking_allow_panic(move || req.execute()).await
+                    let clone_logger = logger.cheap_clone();
+                    graph::spawn_blocking_allow_panic(move || req.execute(&clone_logger)).await
                 };
 
                 let _section = queue.stopwatch.start_section("queue_pop");

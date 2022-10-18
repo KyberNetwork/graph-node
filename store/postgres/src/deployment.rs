@@ -2,9 +2,11 @@
 //! into these methods must be for the shard that holds the actual
 //! deployment data and metadata
 use crate::{detail::GraphNodeVersion, primary::DeploymentId};
+use diesel::debug_query;
 use diesel::{
     connection::SimpleConnection,
     dsl::{count, delete, insert_into, select, sql, update},
+    query_builder::{AsQuery, QueryFragment},
     sql_types::Integer,
 };
 use diesel::{expression::SqlLiteral, pg::PgConnection, sql_types::Numeric};
@@ -13,15 +15,21 @@ use diesel::{
     sql_query,
     sql_types::{Nullable, Text},
 };
-use graph::data::subgraph::{
-    schema::{DeploymentCreate, SubgraphManifestEntity},
-    SubgraphFeature,
-};
-use graph::prelude::{
-    anyhow, bigdecimal::ToPrimitive, hex, web3::types::H256, BigDecimal, BlockNumber, BlockPtr,
-    DeploymentHash, DeploymentState, Schema, StoreError,
-};
 use graph::{blockchain::block_stream::FirehoseCursor, data::subgraph::schema::SubgraphError};
+use graph::{
+    data::subgraph::{
+        schema::{DeploymentCreate, SubgraphManifestEntity},
+        SubgraphFeature,
+    },
+    slog::Logger,
+};
+use graph::{
+    prelude::{
+        anyhow, bigdecimal::ToPrimitive, hex, web3::types::H256, BigDecimal, BlockNumber, BlockPtr,
+        DeploymentHash, DeploymentState, Schema, StoreError,
+    },
+    slog::warn,
+};
 use stable_hash_legacy::crypto::SetHasher;
 use std::{collections::BTreeSet, convert::TryFrom, ops::Bound};
 use std::{str::FromStr, sync::Arc};
@@ -293,6 +301,7 @@ pub fn set_manifest_raw_yaml(
 }
 
 pub fn transact_block(
+    logger: &Logger,
     conn: &PgConnection,
     site: &Site,
     ptr: &BlockPtr,
@@ -313,7 +322,7 @@ pub fn transact_block(
         entity_count_sql(full_count_query, count)
     };
 
-    let row_count = update(
+    let update_stm = update(
         d::table.filter(d::id.eq(site.id)).filter(
             // Asserts that the processing direction is forward.
             d::latest_ethereum_block_number
@@ -327,9 +336,9 @@ pub fn transact_block(
         d::firehose_cursor.eq(firehose_cursor.as_ref()),
         d::entity_count.eq(sql(&count_sql)),
         d::current_reorg_depth.eq(0),
-    ))
-    .execute(conn)
-    .map_err(StoreError::from)?;
+    ));
+
+    let row_count = update_stm.execute(conn).map_err(StoreError::from)?;
 
     match row_count {
         // Common case: A single row was updated.

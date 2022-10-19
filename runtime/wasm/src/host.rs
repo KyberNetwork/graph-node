@@ -173,6 +173,7 @@ where
         let (result_sender, result_receiver) = channel();
         let start_time = Instant::now();
         let metrics = self.metrics.clone();
+        let block_number = block_ptr.number;
 
         self.mapping_request_sender
             .clone()
@@ -209,6 +210,7 @@ where
             "handler" => handler,
             "data_source" => &self.data_source.name(),
             "gas_used" => gas_used.to_string(),
+            "at_block" => block_number,
         );
 
         // Discard the gas value

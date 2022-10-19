@@ -1646,10 +1646,10 @@ impl<'a, Conn> RunQueryDsl<Conn> for FindManyQuery<'a> {}
 
 #[derive(Debug)]
 pub struct InsertQuery<'a> {
-    pub table: &'a Table,
-    pub entities: &'a [(&'a EntityKey, Cow<'a, Entity>)],
-    pub unique_columns: Vec<&'a Column>,
-    pub br_column: BlockRangeColumn<'a>,
+    table: &'a Table,
+    entities: &'a [(&'a EntityKey, Cow<'a, Entity>)],
+    unique_columns: Vec<&'a Column>,
+    br_column: BlockRangeColumn<'a>,
 }
 
 impl<'a> InsertQuery<'a> {

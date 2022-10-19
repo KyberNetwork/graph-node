@@ -13,18 +13,15 @@ use diesel::{
     sql_query,
     sql_types::{Nullable, Text},
 };
+use graph::data::subgraph::{
+    schema::{DeploymentCreate, SubgraphManifestEntity},
+    SubgraphFeature,
+};
 use graph::prelude::{
     anyhow, bigdecimal::ToPrimitive, hex, web3::types::H256, BigDecimal, BlockNumber, BlockPtr,
     DeploymentHash, DeploymentState, Schema, StoreError,
 };
 use graph::{blockchain::block_stream::FirehoseCursor, data::subgraph::schema::SubgraphError};
-use graph::{
-    data::subgraph::{
-        schema::{DeploymentCreate, SubgraphManifestEntity},
-        SubgraphFeature,
-    },
-    slog::Logger,
-};
 use stable_hash_legacy::crypto::SetHasher;
 use std::{collections::BTreeSet, convert::TryFrom, ops::Bound};
 use std::{str::FromStr, sync::Arc};
@@ -296,7 +293,6 @@ pub fn set_manifest_raw_yaml(
 }
 
 pub fn transact_block(
-    _logger: &Logger,
     conn: &PgConnection,
     site: &Site,
     ptr: &BlockPtr,

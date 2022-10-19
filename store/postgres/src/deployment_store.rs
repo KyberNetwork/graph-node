@@ -1106,7 +1106,6 @@ impl DeploymentStore {
             section.end();
 
             dynds::insert(
-                &self.logger,
                 &conn,
                 &site,
                 data_sources,
@@ -1126,7 +1125,6 @@ impl DeploymentStore {
             }
 
             deployment::transact_block(
-                &self.logger,
                 &conn,
                 &site,
                 block_ptr_to,

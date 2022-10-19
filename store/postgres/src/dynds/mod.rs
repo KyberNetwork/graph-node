@@ -10,7 +10,6 @@ use graph::{
     components::store::StoredDynamicDataSource,
     constraint_violation,
     prelude::{BlockNumber, StoreError},
-    slog::Logger,
 };
 
 pub fn load(
@@ -26,7 +25,6 @@ pub fn load(
 }
 
 pub(crate) fn insert(
-    logger: &Logger,
     conn: &PgConnection,
     site: &Site,
     data_sources: &[StoredDynamicDataSource],
@@ -36,7 +34,6 @@ pub(crate) fn insert(
     let is_private = site.schema_version.private_data_sources();
     match is_private {
         true => DataSourcesTable::new(site.namespace.clone()).insert(
-            logger,
             conn,
             data_sources,
             block_ptr.number,

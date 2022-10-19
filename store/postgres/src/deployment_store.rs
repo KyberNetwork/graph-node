@@ -337,8 +337,6 @@ impl DeploymentStore {
             }
         }
 
-        // warn!(self.logger, "++++ EntityInsertion count"; "cnt=" => inserts.len());
-
         // Apply modification groups.
         // Inserts:
         for (entity_type, mut entities) in inserts.into_iter() {

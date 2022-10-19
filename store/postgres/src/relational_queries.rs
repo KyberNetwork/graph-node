@@ -19,7 +19,6 @@ use graph::prelude::{
     EntityFilter, EntityLink, EntityOrder, EntityRange, EntityWindow, ParentLink,
     QueryExecutionError, StoreError, Value, ENV_VARS,
 };
-use graph::slog::Logger;
 use graph::{
     components::store::{AttributeNames, EntityType},
     data::{schema::FulltextAlgorithm, store::scalar},
@@ -1654,7 +1653,6 @@ pub struct InsertQuery<'a> {
 
 impl<'a> InsertQuery<'a> {
     pub fn new(
-        _logger: &Logger,
         table: &'a Table,
         entities: &'a mut [(&'a EntityKey, Cow<Entity>)],
         block: BlockNumber,

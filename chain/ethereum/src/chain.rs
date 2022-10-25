@@ -160,7 +160,7 @@ impl TriggersAdapterSelector<Chain> for EthereumAdapterSelector {
             self.adapters.cheapest_with(capabilities)?.clone()
         };
 
-        let ethrpc_metrics = Arc::new(SubgraphEthRpcMetrics::new(self.registry.clone(), &loc.hash, loc.subgraphName.clone()));
+        let ethrpc_metrics = Arc::new(SubgraphEthRpcMetrics::new(self.registry.clone(), &loc.hash, loc.subgraph_name.clone()));
 
         let adapter = TriggersAdapter {
             logger: logger.clone(),

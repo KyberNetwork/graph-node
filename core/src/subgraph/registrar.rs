@@ -276,7 +276,7 @@ where
         // fake locator
         let logger = self
             .logger_factory
-            .subgraph_logger(&DeploymentLocator::new(DeploymentId(0), hash.clone()));
+            .subgraph_logger(&DeploymentLocator::new(DeploymentId(0), hash.clone(), name.to_string()));
 
         let raw: serde_yaml::Mapping = {
             let file_bytes = self

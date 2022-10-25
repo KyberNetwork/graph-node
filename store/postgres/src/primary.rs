@@ -368,7 +368,7 @@ impl TryFrom<Schema> for Site {
 
 impl From<&Site> for DeploymentLocator {
     fn from(site: &Site) -> Self {
-        DeploymentLocator::new(site.id.into(), site.deployment.clone())
+        DeploymentLocator::new(site.id.into(), site.deployment.clone(), "".to_string())
     }
 }
 
@@ -739,7 +739,7 @@ impl<'a> Connection<'a> {
                 DeploymentHash::new(hash)
                     .map(|hash| {
                         EntityChange::for_assignment(
-                            DeploymentLocator::new(id.into(), hash),
+                            DeploymentLocator::new(id.into(), hash, "".to_string()),
                             EntityChangeOperation::Removed,
                         )
                     })

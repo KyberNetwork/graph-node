@@ -829,6 +829,7 @@ impl DeploymentId {
 pub struct DeploymentLocator {
     pub id: DeploymentId,
     pub hash: DeploymentHash,
+    pub subgraphName: String,
 }
 
 impl CheapClone for DeploymentLocator {}
@@ -845,8 +846,8 @@ impl slog::Value for DeploymentLocator {
 }
 
 impl DeploymentLocator {
-    pub fn new(id: DeploymentId, hash: DeploymentHash) -> Self {
-        Self { id, hash }
+    pub fn new(id: DeploymentId, hash: DeploymentHash, subgraphName: String) -> Self {
+        Self { id, hash, subgraphName}
     }
 }
 

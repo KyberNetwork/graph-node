@@ -788,40 +788,42 @@ pub struct SubgraphEthRpcMetrics {
     request_duration: GaugeVec,
     errors: CounterVec,
     deployment: String,
+    subgraph_name: String,
 }
 
 impl SubgraphEthRpcMetrics {
-    pub fn new(registry: Arc<dyn MetricsRegistry>, subgraph_hash: &str) -> Self {
+    pub fn new(registry: Arc<dyn MetricsRegistry>, subgraph_hash: &str, subgraph_name: String) -> Self {
         let request_duration = registry
             .global_gauge_vec(
                 "deployment_eth_rpc_request_duration",
                 "Measures eth rpc request duration for a subgraph deployment",
-                vec!["deployment", "method", "provider"].as_slice(),
+                vec!["deployment", "method", "provider", "subgraph_name"].as_slice(),
             )
             .unwrap();
         let errors = registry
             .global_counter_vec(
                 "deployment_eth_rpc_errors",
                 "Counts eth rpc request errors for a subgraph deployment",
-                vec!["deployment", "method", "provider"].as_slice(),
+                vec!["deployment", "method", "provider", "subgraph_name"].as_slice(),
             )
             .unwrap();
         Self {
             request_duration,
             errors,
             deployment: subgraph_hash.into(),
+            subgraph_name: subgraph_name,
         }
     }
 
     pub fn observe_request(&self, duration: f64, method: &str, provider: &str) {
         self.request_duration
-            .with_label_values(&[&self.deployment, method, provider])
+            .with_label_values(&[&self.deployment, method, provider, &self.subgraph_name])
             .set(duration);
     }
 
     pub fn add_error(&self, method: &str, provider: &str) {
         self.errors
-            .with_label_values(&[&self.deployment, method, provider])
+            .with_label_values(&[&self.deployment, method, provider, &self.subgraph_name])
             .inc();
     }
 }

@@ -847,7 +847,11 @@ impl slog::Value for DeploymentLocator {
 
 impl DeploymentLocator {
     pub fn new(id: DeploymentId, hash: DeploymentHash, subgraph_name: String) -> Self {
-        Self { id, hash, subgraph_name}
+        Self {
+            id,
+            hash,
+            subgraph_name,
+        }
     }
 }
 

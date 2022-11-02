@@ -4,11 +4,11 @@ use jsonrpc_core::Value;
 use web3::transports::{http, ipc, ws};
 use web3::RequestId;
 
+use crate::ENV_VARS;
+use core::time;
 use graph::prelude::*;
 use graph::url::Url;
-use core::time;
 use std::future::Future;
-use crate::ENV_VARS;
 
 /// Abstraction over the different web3 transports.
 #[derive(Clone, Debug)]

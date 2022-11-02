@@ -6,7 +6,9 @@ use web3::RequestId;
 
 use graph::prelude::*;
 use graph::url::Url;
+use core::time;
 use std::future::Future;
+use crate::ENV_VARS;
 
 /// Abstraction over the different web3 transports.
 #[derive(Clone, Debug)]
@@ -42,7 +44,7 @@ impl Transport {
         // Unwrap: This only fails if something is wrong with the system's TLS config.
         let client = reqwest::Client::builder()
             .default_headers(headers)
-            .pool_max_idle_per_host(0)
+            .pool_idle_timeout(time::Duration::from_secs(ENV_VARS.pool_idle_timeout))
             .build()
             .unwrap();
         Transport::RPC(http::Http::with_client(client, rpc))

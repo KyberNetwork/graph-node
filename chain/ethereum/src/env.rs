@@ -94,6 +94,12 @@ pub struct EnvVars {
     // set this env var to false to make it ignore the empty response,
     // then subgraph can retry to call rpc if it needs
     pub allow_eth_call_empty_response_cache: bool,
+    // Sometimes the server idle timeout of connection is too low,
+    // which leads to the idle connection in pool will be rejected
+    // right after it is selected by client
+    // in that case, this env_var will help to reduce the client idle timeout
+    // to avoid that case happens
+    pub pool_idle_timeout: u64,
 }
 
 // This does not print any values avoid accidentally leaking any sensitive env vars
@@ -137,6 +143,7 @@ impl From<Inner> for EnvVars {
             target_triggers_per_block_range: x.target_triggers_per_block_range,
             genesis_block_number: x.genesis_block_number,
             allow_eth_call_empty_response_cache: x.allow_eth_call_empty_response_cache.0,
+            pool_idle_timeout: x.pool_idle_timeout,
         }
     }
 }
@@ -189,4 +196,6 @@ struct Inner {
     genesis_block_number: u64,
     #[envconfig(from = "ALLOW_ETH_CALL_EMPTY_RESPONSE_CACHE", default = "true")]
     allow_eth_call_empty_response_cache: EnvVarBoolean,
+    #[envconfig(from = "POOL_IDLE_TIMEOUT", default = "90")]
+    pool_idle_timeout: u64,
 }

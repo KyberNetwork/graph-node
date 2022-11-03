@@ -322,6 +322,7 @@ pub struct Site {
     pub id: DeploymentId,
     /// The subgraph deployment
     pub deployment: DeploymentHash,
+    pub name: String,
     /// The name of the database shard
     pub shard: Shard,
     /// The database namespace (schema) that holds the data for the deployment
@@ -356,6 +357,7 @@ impl TryFrom<Schema> for Site {
         Ok(Self {
             id: schema.id,
             deployment,
+            name: schema.name,
             namespace,
             shard,
             network: schema.network,
@@ -368,7 +370,7 @@ impl TryFrom<Schema> for Site {
 
 impl From<&Site> for DeploymentLocator {
     fn from(site: &Site) -> Self {
-        DeploymentLocator::new(site.id.into(), site.deployment.clone(), "".to_string())
+        DeploymentLocator::new(site.id.into(), site.deployment.clone(), site.name.clone())
     }
 }
 
@@ -379,6 +381,7 @@ pub fn make_dummy_site(deployment: DeploymentHash, namespace: Namespace, network
     Site {
         id: DeploymentId(-7),
         deployment,
+        name: "dummy".to_string(),
         shard: PRIMARY_SHARD.clone(),
         namespace,
         network,
@@ -1043,6 +1046,7 @@ impl<'a> Connection<'a> {
         &self,
         shard: Shard,
         deployment: DeploymentHash,
+        name: String,
         network: String,
         schema_version: DeploymentSchemaVersion,
         active: bool,
@@ -1072,6 +1076,7 @@ impl<'a> Connection<'a> {
         Ok(Site {
             id,
             deployment,
+            name,
             shard,
             namespace,
             network,
@@ -1086,6 +1091,7 @@ impl<'a> Connection<'a> {
         &self,
         shard: Shard,
         subgraph: &DeploymentHash,
+        name: String,
         network: String,
         schema_version: DeploymentSchemaVersion,
     ) -> Result<Site, StoreError> {
@@ -1093,7 +1099,7 @@ impl<'a> Connection<'a> {
             return Ok(site);
         }
 
-        self.create_site(shard, subgraph.clone(), network, schema_version, true)
+        self.create_site(shard, subgraph.clone(), name, network, schema_version, true)
     }
 
     pub fn assigned_node(&self, site: &Site) -> Result<Option<NodeId>, StoreError> {
@@ -1113,6 +1119,7 @@ impl<'a> Connection<'a> {
         self.create_site(
             shard,
             src.deployment.clone(),
+            src.name.clone(),
             src.network.clone(),
             src.schema_version,
             false,

@@ -152,6 +152,7 @@ impl OffchainMonitor {
         logger: Logger,
         registry: Arc<dyn MetricsRegistry>,
         subgraph_hash: &DeploymentHash,
+        subgraph_name: &str,
         ipfs_service: IpfsService,
     ) -> Self {
         let (ipfs_monitor_tx, ipfs_monitor_rx) = mpsc::channel(10);
@@ -159,7 +160,7 @@ impl OffchainMonitor {
             ipfs_service,
             ipfs_monitor_tx,
             logger,
-            PollingMonitorMetrics::new(registry, subgraph_hash),
+            PollingMonitorMetrics::new(registry, subgraph_hash, subgraph_name),
         );
         Self {
             ipfs_monitor,

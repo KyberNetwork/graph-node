@@ -13,12 +13,13 @@ pub struct PollingMonitorMetrics {
 }
 
 impl PollingMonitorMetrics {
-    pub fn new(registry: Arc<dyn MetricsRegistry>, subgraph_hash: &DeploymentHash) -> Self {
+    pub fn new(registry: Arc<dyn MetricsRegistry>, subgraph_hash: &DeploymentHash, subgraph_name: &str,) -> Self {
         let requests = registry
             .new_deployment_counter(
                 "polling_monitor_requests",
                 "counts the total requests made to the service being polled",
                 subgraph_hash.as_str(),
+                subgraph_name,
             )
             .unwrap();
         let not_found = registry
@@ -26,6 +27,7 @@ impl PollingMonitorMetrics {
                 "polling_monitor_not_found",
                 "counts 'not found' responses returned from the service being polled",
                 subgraph_hash.as_str(),
+                subgraph_name,
             )
             .unwrap();
         let errors = registry
@@ -33,6 +35,7 @@ impl PollingMonitorMetrics {
                 "polling_monitor_errors",
                 "counts errors returned from the service being polled",
                 subgraph_hash.as_str(),
+                subgraph_name,
             )
             .unwrap();
         let queue_depth = registry
@@ -40,6 +43,7 @@ impl PollingMonitorMetrics {
                 "polling_monitor_queue_depth",
                 "size of the queue of polling requests",
                 subgraph_hash.as_str(),
+                subgraph_name,
             )
             .unwrap();
         Self {

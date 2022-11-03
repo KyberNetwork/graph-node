@@ -346,6 +346,7 @@ impl BlockStreamMetrics {
     pub fn new(
         registry: Arc<dyn MetricsRegistry>,
         deployment_id: &DeploymentHash,
+        subgraph_name: &str,
         network: String,
         shard: String,
         stopwatch: StopwatchMetrics,
@@ -355,6 +356,7 @@ impl BlockStreamMetrics {
                 "deployment_reverted_blocks",
                 "Track the last reverted block for a subgraph deployment",
                 deployment_id.as_str(),
+                subgraph_name,
             )
             .expect("Failed to create `deployment_reverted_blocks` gauge");
         let labels = labels! {

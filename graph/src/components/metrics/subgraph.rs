@@ -18,6 +18,7 @@ impl SubgraphInstanceMetrics {
     pub fn new(
         registry: Arc<dyn MetricsRegistry>,
         subgraph_hash: &str,
+        subgraph_name: &str,
         stopwatch: StopwatchMetrics,
     ) -> Self {
         let block_trigger_count = registry
@@ -25,6 +26,7 @@ impl SubgraphInstanceMetrics {
                 "deployment_block_trigger_count",
                 "Measures the number of triggers in each block for a subgraph deployment",
                 subgraph_hash,
+                subgraph_name,
                 vec![1.0, 5.0, 10.0, 20.0, 50.0],
             )
             .expect("failed to create `deployment_block_trigger_count` histogram");
@@ -33,6 +35,7 @@ impl SubgraphInstanceMetrics {
                 "deployment_trigger_processing_duration",
                 "Measures duration of trigger processing for a subgraph deployment",
                 subgraph_hash,
+                subgraph_name,
                 vec![0.01, 0.05, 0.1, 0.5, 1.5, 5.0, 10.0, 30.0, 120.0],
             )
             .expect("failed to create `deployment_trigger_processing_duration` histogram");
@@ -41,6 +44,7 @@ impl SubgraphInstanceMetrics {
                 "deployment_block_processing_duration",
                 "Measures duration of block processing for a subgraph deployment",
                 subgraph_hash,
+                subgraph_name,
                 vec![0.05, 0.2, 0.7, 1.5, 4.0, 10.0, 60.0, 120.0, 240.0],
             )
             .expect("failed to create `deployment_block_processing_duration` histogram");
@@ -49,6 +53,7 @@ impl SubgraphInstanceMetrics {
                 "deployment_transact_block_operations_duration",
                 "Measures duration of commiting all the entity operations in a block and updating the subgraph pointer",
                 subgraph_hash,
+                subgraph_name,
                 vec![0.01, 0.05, 0.1, 0.3, 0.7, 2.0],
             )
             .expect("failed to create `deployment_transact_block_operations_duration_{}");

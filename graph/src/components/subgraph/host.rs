@@ -80,6 +80,7 @@ impl HostMetrics {
     pub fn new(
         registry: Arc<dyn MetricsRegistry>,
         subgraph: &str,
+        subgraph_name: &str,
         stopwatch: StopwatchMetrics,
     ) -> Self {
         let handler_execution_time = registry
@@ -87,6 +88,7 @@ impl HostMetrics {
                 "deployment_handler_execution_time",
                 "Measures the execution time for handlers",
                 subgraph,
+                subgraph_name,
                 vec![String::from("handler")],
                 vec![0.1, 0.5, 1.0, 10.0, 100.0],
             )
@@ -96,6 +98,7 @@ impl HostMetrics {
                 "deployment_host_fn_execution_time",
                 "Measures the execution time for host functions",
                 subgraph,
+                subgraph_name,
                 vec![String::from("host_fn_name")],
                 vec![0.025, 0.05, 0.2, 2.0, 8.0, 20.0],
             )

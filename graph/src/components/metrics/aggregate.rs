@@ -17,13 +17,14 @@ pub struct Aggregate {
 }
 
 impl Aggregate {
-    pub fn new(name: &str, subgraph: &str, help: &str, registry: Arc<dyn MetricsRegistry>) -> Self {
+    pub fn new(name: &str, subgraph: &str, subgraph_name: &str, help: &str, registry: Arc<dyn MetricsRegistry>) -> Self {
         let make_gauge = |suffix: &str| {
             registry
                 .new_deployment_gauge(
                     &format!("{}_{}", name, suffix),
                     &format!("{} ({})", help, suffix),
                     subgraph,
+                    subgraph_name,
                 )
                 .unwrap_or_else(|_| {
                     panic!(

@@ -522,7 +522,7 @@ impl SubgraphStoreInner {
                 Some(src_layout) => src_layout.site.schema_version,
             };
             let conn = self.primary_conn()?;
-            let site = conn.allocate_site(shard, &schema.id, network_name, schema_version)?;
+            let site = conn.allocate_site(shard, &schema.id, name.to_string(), network_name, schema_version)?;
             let node_id = conn.assigned_node(&site)?.unwrap_or(node_id);
             (site, node_id)
         };

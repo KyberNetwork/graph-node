@@ -308,17 +308,20 @@ impl<S: SubgraphStore> SubgraphInstanceManager<S> {
         let subgraph_metrics = Arc::new(SubgraphInstanceMetrics::new(
             registry.cheap_clone(),
             deployment.hash.as_str(),
+            deployment.subgraph_name.as_str(),
             stopwatch_metrics.clone(),
         ));
         let subgraph_metrics_unregister = subgraph_metrics.clone();
         let host_metrics = Arc::new(HostMetrics::new(
             registry.cheap_clone(),
             deployment.hash.as_str(),
+            deployment.subgraph_name.as_str(),
             stopwatch_metrics.clone(),
         ));
         let block_stream_metrics = Arc::new(BlockStreamMetrics::new(
             registry.cheap_clone(),
             &deployment.hash,
+            &deployment.subgraph_name.as_str(),
             manifest.network_name(),
             store.shard().to_string(),
             stopwatch_metrics,
@@ -328,6 +331,7 @@ impl<S: SubgraphStore> SubgraphInstanceManager<S> {
             logger.cheap_clone(),
             registry.cheap_clone(),
             &manifest.id,
+            deployment.subgraph_name.as_str(),
             self.ipfs_service.cheap_clone(),
         );
 

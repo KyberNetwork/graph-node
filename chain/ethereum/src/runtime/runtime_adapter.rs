@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
-use crate::ENV_VARS;
 use crate::data_source::MappingABI;
+use crate::ENV_VARS;
 use crate::{
     capabilities::NodeCapabilities, network::EthereumNetworkAdapters, Chain, DataSource,
     EthereumAdapter, EthereumAdapterTrait, EthereumContractCall, EthereumContractCallError,
@@ -17,13 +17,13 @@ use graph::{
         ethabi::{self, Address, Token},
         EthereumCallCache, Future01CompatExt,
     },
-    util::backoff::ExponentialBackoff,
     runtime::{asc_get, asc_new, AscPtr, HostExportError},
     semver::Version,
     slog::{info, trace, Logger},
+    util::backoff::ExponentialBackoff,
 };
-use std::time::Duration;
 use graph_runtime_wasm::asc_abi::class::{AscEnumArray, EthereumValueKind};
+use std::time::Duration;
 
 use super::abi::{AscUnresolvedContractCall, AscUnresolvedContractCall_0_0_4};
 

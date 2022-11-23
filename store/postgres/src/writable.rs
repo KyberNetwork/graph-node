@@ -598,6 +598,10 @@ impl Queue {
                         warn!(logger, "Past block received, Ignoring...");
                         queue.queue.pop().await;
                     }
+                    Ok(Err(StoreError::InvalidIdentifier(err))) => {
+                        warn!(logger, "block already processed, ignoring"; "err" => err);
+                        queue.queue.pop().await;
+                    }
                     Ok(Err(e)) => {
                         error!(logger, "Subgraph writer failed"; "error" => e.to_string());
                         queue.record_err(e);

@@ -419,9 +419,7 @@ async fn main() {
             BusInitializer::new(ENV_VARS.bus_url.clone().or(opt.bus_url), logger.clone()).await;
 
         if bus.is_some() {
-            graph::spawn_allow_panic(
-                async move { bus.unwrap().start(bus_receiver.unwrap()).await },
-            );
+            graph::spawn(async move { bus.unwrap().start(bus_receiver.unwrap()).await });
         };
 
         let subgraph_instance_manager = SubgraphInstanceManager::new(

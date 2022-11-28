@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 pub struct BusMessage {
     pub subgraph_id: String,
-    pub value: String,
+    pub value: Vec<String>,
 }
 
 #[async_trait]

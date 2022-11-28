@@ -32,7 +32,8 @@ impl Bus for RabbitmqBus {
 
     async fn send_plain_text(&self, message: BusMessage) -> Result<(), BusError> {
         // NOTE: this is very UGLY, but we are doing POC, so its ok for now
-        let data_as_bytes = message.value.as_bytes();
+        let join_str = message.value.join(",");
+        let data_as_bytes = join_str.as_bytes();
         let routing_key = message.subgraph_id.as_str();
         let exchange_name = message.subgraph_id.as_str();
         let mut exchange_opts = ExchangeDeclareOptions::default();

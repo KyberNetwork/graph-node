@@ -27,5 +27,4 @@
 /tests/integration-tests/**/truffle_output
 
 # ignore config file
-sf.*.rs
 key.json

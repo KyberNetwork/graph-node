@@ -238,7 +238,11 @@ impl<C: Blockchain> HostExports<C> {
         Ok(result)
     }
 
-    pub(crate) fn bus_send(&self, value: String, _gas: &GasCounter) -> Result<(), HostExportError> {
+    pub(crate) fn bus_send(
+        &self,
+        value: Vec<String>,
+        _gas: &GasCounter,
+    ) -> Result<(), HostExportError> {
         // NOTE: Always OK because we dont want to interrupt/terminate the WasmRuntimeHost
         if let Some(sender) = &self.bus_sender {
             let msg = BusMessage {

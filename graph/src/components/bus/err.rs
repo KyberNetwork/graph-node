@@ -7,7 +7,8 @@ pub enum BusError {
     SendMappingError(String),
     SendModificationError(String),
     SendPlainTextError(String),
-    BadMessage,
+    SendSchemaMessageError(String),
+    BadMessage(String),
     NoRoutingDefinition,
 }
 
@@ -23,11 +24,14 @@ impl Display for BusError {
             BusError::SendPlainTextError(err) => {
                 write!(f, "BusError: sending plaintext failed => {}", err)
             }
+            BusError::SendSchemaMessageError(err) => {
+                write!(f, "BusError: sending message with schema failed => {}", err)
+            }
             BusError::InitializationError => {
                 write!(f, "BusError: initialization failed")
             }
-            BusError::BadMessage => {
-                write!(f, "BusError: bad format message")
+            BusError::BadMessage(err) => {
+                write!(f, "BusError: bad format message ({})", err)
             }
             BusError::NoRoutingDefinition => {
                 write!(f, "BusError: no routing definition for this")

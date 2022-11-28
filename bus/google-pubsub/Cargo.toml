@@ -8,6 +8,5 @@ edition = "2021"
 [dependencies]
 google-cloud-pubsub = "0.9.0"
 google-cloud-googleapis = "0.6.0"
-apache-avro = "0.14.0"
 serde = "1.0"
 graph = { path = "../../graph" }

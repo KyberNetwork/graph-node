@@ -16,7 +16,6 @@ graph-core = { path = "../core" }
 graph-mock = { path = "../mock" }
 graph-graphql = { path = "../graphql" }
 graph-store-postgres = { path = "../store/postgres" }
-test-bus = { path = "../bus/test-bus" }
 graph-runtime-wasm = { path = "../runtime/wasm" }
 slog = { version = "2.7.0", features = ["release_max_level_trace", "max_level_trace"] }
 graphql-parser = "0.4.0"

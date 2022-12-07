@@ -1072,6 +1072,13 @@ impl EthereumAdapterTrait for EthereumAdapter {
         block: LightEthereumBlock,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<EthereumBlock, IngestorError>> + Send>>
     {
+        if ENV_VARS.eth_skip_fetching_receipts {
+            return Box::pin(std::future::ready(Ok(EthereumBlock {
+                block: Arc::new(block),
+                transaction_receipts: Vec::new(),
+            })));
+        }
+
         let web3 = Arc::clone(&self.web3);
         let logger = logger.clone();
         let block_hash = block.hash.expect("block is missing block hash");
@@ -1566,6 +1573,9 @@ pub(crate) fn parse_call_triggers(
     call_filter: &EthereumCallFilter,
     block: &EthereumBlockWithCalls,
 ) -> anyhow::Result<Vec<EthereumTrigger>> {
+    if ENV_VARS.eth_skip_fetching_receipts {
+        panic!("Kyber this is not supported");
+    }
     if call_filter.is_empty() {
         return Ok(vec![]);
     }
@@ -1684,6 +1694,9 @@ async fn filter_call_triggers_from_unsuccessful_transactions(
         bail!("failed to find transactions in block for the given call triggers")
     }
 
+    if ENV_VARS.eth_skip_fetching_receipts {
+        panic!("Kyber this is not supported");
+    }
     // We'll also need the receipts for those transactions. In this step we collect all receipts
     // we have in store for the current block.
     let mut receipts = chain_store

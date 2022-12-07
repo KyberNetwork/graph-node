@@ -94,6 +94,8 @@ pub struct EnvVars {
     // set this env var to false to make it ignore the empty response,
     // then subgraph can retry to call rpc if it needs
     pub allow_eth_call_empty_response_cache: bool,
+
+    pub eth_skip_fetching_receipts: bool,
 }
 
 // This does not print any values avoid accidentally leaking any sensitive env vars
@@ -137,6 +139,7 @@ impl From<Inner> for EnvVars {
             target_triggers_per_block_range: x.target_triggers_per_block_range,
             genesis_block_number: x.genesis_block_number,
             allow_eth_call_empty_response_cache: x.allow_eth_call_empty_response_cache.0,
+            eth_skip_fetching_receipts: x.eth_skip_fetching_receipts.0,
         }
     }
 }
@@ -189,4 +192,6 @@ struct Inner {
     genesis_block_number: u64,
     #[envconfig(from = "ALLOW_ETH_CALL_EMPTY_RESPONSE_CACHE", default = "true")]
     allow_eth_call_empty_response_cache: EnvVarBoolean,
+    #[envconfig(from = "ETH_SKIP_FETCHING_RECEIPTS", default = "true")]
+    eth_skip_fetching_receipts: EnvVarBoolean,
 }

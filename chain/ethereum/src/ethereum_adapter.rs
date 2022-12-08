@@ -1515,9 +1515,6 @@ pub(crate) async fn get_calls(
     // For final blocks, or nonfinal blocks where we already checked
     // (`calls.is_some()`), do nothing; if we haven't checked for calls, do
     // that now
-    if ENV_VARS.eth_skip_fetching_receipts {
-        panic!("Kyber not supported!")
-    }
     match block {
         BlockFinality::Final(_)
         | BlockFinality::NonFinal(EthereumBlockWithCalls {
@@ -1528,7 +1525,11 @@ pub(crate) async fn get_calls(
             ethereum_block,
             calls: None,
         }) => {
-            let calls = if !requires_traces || ethereum_block.transaction_receipts.is_empty() {
+            let calls = if !requires_traces {
+                vec![]
+            } else if ENV_VARS.eth_skip_fetching_receipts {
+                panic!("Kyber not supported!")
+            } else if ethereum_block.transaction_receipts.is_empty() {
                 vec![]
             } else {
                 adapter

@@ -1851,7 +1851,11 @@ async fn fetch_transaction_receipt_with_retry(
             let start = Instant::now();
 
             async move {
-                let result = web3.eth().transaction_receipt(transaction_hash).boxed().await;
+                let result = web3
+                    .eth()
+                    .transaction_receipt(transaction_hash)
+                    .boxed()
+                    .await;
                 let elapsed = start.elapsed().as_secs_f64();
                 provider_metrics.observe_request(elapsed, "eth_getTransactionReceipt", &provider);
                 //TODO(datcm): add subgraph metrics

@@ -128,7 +128,9 @@ impl From<Inner> for EnvVars {
             block_batch_size: x.block_batch_size,
             max_block_range_size: x.max_block_range_size,
             json_rpc_timeout: Duration::from_secs(x.json_rpc_timeout_in_secs),
-            json_rpc_timeout_get_txn_receipt: Duration::from_secs(x.json_rpc_timeout_get_txn_receipt_in_secs),
+            json_rpc_timeout_get_txn_receipt: Duration::from_secs(
+                x.json_rpc_timeout_get_txn_receipt_in_secs,
+            ),
             request_retries: x.request_retries,
             block_ingestor_max_concurrent_json_rpc_calls: x
                 .block_ingestor_max_concurrent_json_rpc_calls,
@@ -172,7 +174,10 @@ struct Inner {
     max_block_range_size: BlockNumber,
     #[envconfig(from = "GRAPH_ETHEREUM_JSON_RPC_TIMEOUT", default = "180")]
     json_rpc_timeout_in_secs: u64,
-    #[envconfig(from = "GRAPH_ETHEREUM_JSON_RPC_TIMEOUT_GET_TXN_RECEIPT", default = "180")]
+    #[envconfig(
+        from = "GRAPH_ETHEREUM_JSON_RPC_TIMEOUT_GET_TXN_RECEIPT",
+        default = "180"
+    )]
     json_rpc_timeout_get_txn_receipt_in_secs: u64,
     #[envconfig(from = "GRAPH_ETHEREUM_REQUEST_RETRIES", default = "10")]
     request_retries: usize,

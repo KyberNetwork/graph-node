@@ -69,13 +69,21 @@ run_graph_node() {
         wait_for_ipfs "$ipfs"
         wait_for "$postgres_host:$postgres_port" -t 120
         sleep 5
-
-        exec graph-node \
-            --node-id "$node_id" \
-            --postgres-url "$postgres_url" \
-            --ethereum-ws $ethereum \
-            --ipfs "$ipfs" \
-            ${fork_base:+ --fork-base "$fork_base"}
+        if [ -n "$ETHEREUM" ]
+            exec graph-node \
+                --node-id "$node_id" \
+                --postgres-url "$postgres_url" \
+                --ethereum-rpc $ethereum \
+                --ipfs "$ipfs" \
+                ${fork_base:+ --fork-base "$fork_base"}
+        else 
+            exec graph-node \
+                --node-id "$node_id" \
+                --postgres-url "$postgres_url" \
+                --ethereum-ws $ethereum-ws \
+                --ipfs "$ipfs" \
+                ${fork_base:+ --fork-base "$fork_base"}
+        fi
     fi
 }
 

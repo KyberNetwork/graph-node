@@ -207,6 +207,13 @@ pub struct EnvVars {
     pub static_filters_threshold: usize,
     /// Message Bus service
     pub bus_url: Option<String>,
+
+    /// Set by the environment variable
+    /// `POOL_MAX_IDLE_PER_HOST`. The default value is 100.
+    pub pool_max_idle_per_host: usize,
+    /// Set by the environment variable
+    /// `POOL_IDLE_TIME_OUT`. The default value is 60s.
+    pub pool_idle_time_out: Duration,
 }
 
 impl EnvVars {
@@ -264,6 +271,8 @@ impl EnvVars {
             external_ws_base_url: inner.external_ws_base_url,
             static_filters_threshold: inner.static_filters_threshold,
             bus_url: inner.bus_url,
+            pool_max_idle_per_host: inner.pool_max_idle_per_host,
+            pool_idle_time_out: Duration::from_secs(inner.pool_idle_time_out),
         })
     }
 
@@ -382,6 +391,10 @@ struct Inner {
     static_filters_threshold: usize,
     #[envconfig(from = "BUS_URL")]
     bus_url: Option<String>,
+    #[envconfig(from = "POOL_MAX_IDLE_PER_HOST", default = "100")]
+    pub pool_max_idle_per_host: usize,
+    #[envconfig(from = "POOL_IDLE_TIME_OUT", default = "60")]
+    pub pool_idle_time_out: Duration,
 }
 
 #[derive(Clone, Debug)]

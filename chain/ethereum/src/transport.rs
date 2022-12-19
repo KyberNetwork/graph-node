@@ -42,7 +42,8 @@ impl Transport {
         // Unwrap: This only fails if something is wrong with the system's TLS config.
         let client = reqwest::Client::builder()
             .default_headers(headers)
-            .pool_max_idle_per_host(0)
+            .pool_max_idle_per_host(ENV_VARS.pool_max_idle_per_host)
+            .pool_idle_timeout(ENV_VARS.pool_idle_time_out)
             .build()
             .unwrap();
         Transport::RPC(http::Http::with_client(client, rpc))

@@ -391,7 +391,7 @@ struct Inner {
     static_filters_threshold: usize,
     #[envconfig(from = "BUS_URL")]
     bus_url: Option<String>,
-    #[envconfig(from = "POOL_MAX_IDLE_PER_HOST", default = "100")]
+    #[envconfig(from = "POOL_MAX_IDLE_PER_HOST", default = "20")]
     pub pool_max_idle_per_host: usize,
     #[envconfig(from = "POOL_IDLE_TIME_OUT", default = "60")]
     pub pool_idle_time_out: Duration,

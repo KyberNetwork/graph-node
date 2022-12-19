@@ -80,7 +80,7 @@ run_graph_node() {
             exec graph-node \
                 --node-id "$node_id" \
                 --postgres-url "$postgres_url" \
-                --ethereum-ws $ethereum-ws \
+                --ethereum-ws $ethereum_ws \
                 --ipfs "$ipfs" \
                 ${fork_base:+ --fork-base "$fork_base"}
         fi

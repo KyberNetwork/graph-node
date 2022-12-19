@@ -394,7 +394,7 @@ struct Inner {
     #[envconfig(from = "POOL_MAX_IDLE_PER_HOST", default = "20")]
     pub pool_max_idle_per_host: usize,
     #[envconfig(from = "POOL_IDLE_TIME_OUT", default = "60")]
-    pub pool_idle_time_out: Duration,
+    pub pool_idle_time_out: u64,
 }
 
 #[derive(Clone, Debug)]

@@ -209,7 +209,7 @@ pub struct EnvVars {
     pub bus_url: Option<String>,
 
     /// Set by the environment variable
-    /// `POOL_MAX_IDLE_PER_HOST`. The default value is 100.
+    /// `POOL_MAX_IDLE_PER_HOST`. The default value is 20.
     pub pool_max_idle_per_host: usize,
     /// Set by the environment variable
     /// `POOL_IDLE_TIME_OUT`. The default value is 60s.

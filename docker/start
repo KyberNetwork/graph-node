@@ -69,7 +69,7 @@ run_graph_node() {
         wait_for_ipfs "$ipfs"
         wait_for "$postgres_host:$postgres_port" -t 120
         sleep 5
-        if [ -n "$ETHEREUM" ]
+        if [ -n "$ethereum" ]
         then
             exec graph-node \
                 --node-id "$node_id" \

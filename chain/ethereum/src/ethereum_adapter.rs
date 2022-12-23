@@ -423,6 +423,8 @@ impl EthereumAdapter {
         block_ptr: BlockPtr,
     ) -> impl Future<Item = Bytes, Error = EthereumContractCallError> + Send {
         let web3 = self.web3.clone();
+        let provider_metrics = self.metrics.clone();
+        let provider = self.provider.clone();
 
         // Ganache does not support calls by block hash.
         // See https://github.com/trufflesuite/ganache-cli/issues/973
@@ -442,6 +444,9 @@ impl EthereumAdapter {
             .run(move || {
                 let call_data = call_data.clone();
                 let web3 = web3.cheap_clone();
+                let start = Instant::now();
+                let provider = provider.clone();
+                let provider_metrics = provider_metrics.cheap_clone();
 
                 async move {
                     let req = CallRequest {
@@ -457,6 +462,8 @@ impl EthereumAdapter {
                         transaction_type: None,
                     };
                     let result = web3.eth().call(req, Some(block_id)).boxed().await;
+                    let elapsed = start.elapsed().as_secs_f64();
+                    provider_metrics.observe_request(elapsed, "eth_call", &provider);
 
                     // Try to check if the call was reverted. The JSON-RPC response for reverts is
                     // not standardized, so we have ad-hoc checks for each Ethereum client.

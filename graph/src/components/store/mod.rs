@@ -14,6 +14,7 @@ use graphql_parser::schema as s;
 use serde::{Deserialize, Serialize};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::env;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -850,6 +851,15 @@ impl slog::Value for DeploymentLocator {
 impl DeploymentLocator {
     pub fn new(id: DeploymentId, hash: DeploymentHash) -> Self {
         Self { id, hash }
+    }
+
+    pub fn get_subgraph_alias(&self) -> String {
+        let current_hash = self.hash.to_owned();
+        let alias_env_key = vec!["ALIAS".to_string(), current_hash.to_string()].join("_");
+        match env::var(alias_env_key) {
+            Ok(v) => format!("{:?}", v),
+            Err(_) => "NA".to_owned(),
+        }
     }
 }
 

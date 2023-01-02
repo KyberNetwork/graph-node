@@ -78,9 +78,11 @@ impl LoggerFactory {
 
     /// Creates a subgraph logger with Elasticsearch support.
     pub fn subgraph_logger(&self, loc: &DeploymentLocator) -> Logger {
-        let term_logger = self
-            .parent
-            .new(o!("subgraph_id" => loc.hash.to_string(), "sgd" => loc.id.to_string()));
+        let term_logger = self.parent.new(o!(
+            "subgraph_id" => loc.hash.to_string(),
+            "sgd" => loc.id.to_string(),
+            "alias" => loc.get_subgraph_alias(),
+        ));
 
         self.elastic_config
             .clone()

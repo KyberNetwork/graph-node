@@ -219,7 +219,7 @@ impl Config {
             .expect("a validated config has a primary store")
     }
 
-    pub fn query_only(&self, node: &NodeId) -> bool {
+    pub fn query_only(&self, _node: &NodeId) -> bool {
         match self.functionalities {
             NodeFunctionalities::QueryOnly => true,
             _ => false,

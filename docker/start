@@ -91,6 +91,7 @@ run_graph_node() {
 start_query_node() {
     # Query nodes are never the block ingestor
     export DISABLE_BLOCK_INGESTOR=true
+    export NODE_FUNCTIONALITIES=query-only
     run_graph_node
 }
 

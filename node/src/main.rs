@@ -142,6 +142,13 @@ async fn main() {
         .expect("Node ID must be between 1 and 63 characters in length");
     let query_only = config.query_only(&node_id);
 
+    warn!(
+        logger, "GRAPH_NODE_FUNCTIONALITIES";
+        "query-only" => query_only,
+        "disable-block-ingestor" => opt.disable_block_ingestor,
+        "functionalities" => opt.functionalities,
+    );
+
     // Obtain subgraph related command-line arguments
     let subgraph = opt.subgraph.clone();
 

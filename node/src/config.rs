@@ -82,7 +82,7 @@ pub struct Config {
     pub stores: BTreeMap<String, Shard>,
     pub chains: ChainSection,
     pub deployment: Deployment,
-    pub functionalities: NodeFunctionalities,
+    pub functionalities: Option<NodeFunctionalities>,
 }
 
 fn validate_name(s: &str) -> Result<()> {
@@ -199,7 +199,7 @@ impl Config {
             stores,
             chains,
             deployment,
-            functionalities,
+            functionalities: Some(functionalities),
         })
     }
 
@@ -221,9 +221,14 @@ impl Config {
 
     pub fn query_only(&self, _node: &NodeId) -> bool {
         match self.functionalities {
-            NodeFunctionalities::QueryOnly => true,
+            Some(NodeFunctionalities::QueryOnly) => true,
             _ => false,
         }
+        /*
+        FIXME: we gonna have to deal with this later
+        once we start using `config.toml` for instance's configuration
+        */
+
         // self.general
         //     .as_ref()
         //     .map(|g| match g.query.find(node.as_str()) {

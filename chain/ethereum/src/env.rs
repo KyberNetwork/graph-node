@@ -96,6 +96,9 @@ pub struct EnvVars {
     // set this env var to false to make it ignore the empty response,
     // then subgraph can retry to call rpc if it needs
     pub allow_eth_call_empty_response_cache: bool,
+    // Set by the environment variable
+    // `DATADOG_AGENT_ENDPOINT`. The default value is http://localhost:8126
+    pub datadog_agent_endpoint: String,
 }
 
 // This does not print any values avoid accidentally leaking any sensitive env vars
@@ -142,6 +145,7 @@ impl From<Inner> for EnvVars {
             target_triggers_per_block_range: x.target_triggers_per_block_range,
             genesis_block_number: x.genesis_block_number,
             allow_eth_call_empty_response_cache: x.allow_eth_call_empty_response_cache.0,
+            datadog_agent_endpoint: x.datadog_agent_endpoint,
         }
     }
 }
@@ -199,4 +203,6 @@ struct Inner {
     genesis_block_number: u64,
     #[envconfig(from = "ALLOW_ETH_CALL_EMPTY_RESPONSE_CACHE", default = "true")]
     allow_eth_call_empty_response_cache: EnvVarBoolean,
+    #[envconfig(from = "DATADOG_AGENT_ENDPOINT", default = "http://localhost:8126")]
+    datadog_agent_endpoint: String,
 }

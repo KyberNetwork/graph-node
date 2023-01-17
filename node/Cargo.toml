@@ -47,3 +47,5 @@ diesel = "1.4.8"
 http = "0.2.5" # must be compatible with the version rust-web3 uses
 prometheus = { version ="0.13.3", features = ["push"] }
 json-structural-diff = {version = "0.1", features = ["colorize"] }
+opentelemetry-datadog = "0.6.0"
+opentelemetry = "0.18.0"

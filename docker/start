@@ -117,7 +117,7 @@ fi
 # variable to a non-zero length string:
 if [ -z "$GRAPH_NODE_ID_USE_LITERAL_VALUE" ]
 then
-        node_id="${node_id//-/_}"
+    node_id="${node_id//-/_}"
 fi
 
 if [ -n "$disable_core_dumps" ]

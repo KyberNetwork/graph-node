@@ -233,7 +233,6 @@ fn insert_entity_at(
     );
     let inserted = layout
         .insert(
-            &*LOGGER,
             &conn,
             &entity_type,
             &mut entities_with_keys,
@@ -275,7 +274,6 @@ fn update_entity_at(
 
     let updated = layout
         .update(
-            &*LOGGER,
             &conn,
             &entity_type,
             &mut entities_with_keys,
@@ -570,14 +568,7 @@ fn update() {
         let entity_type = EntityType::from("Scalar");
         let mut entities = vec![(&key, Cow::from(&entity))];
         layout
-            .update(
-                &*LOGGER,
-                &conn,
-                &entity_type,
-                &mut entities,
-                0,
-                &MOCK_STOPWATCH,
-            )
+            .update(&conn, &entity_type, &mut entities, 0, &MOCK_STOPWATCH)
             .expect("Failed to update");
 
         let actual = layout
@@ -635,14 +626,7 @@ fn update_many() {
             .collect();
 
         layout
-            .update(
-                &*LOGGER,
-                &conn,
-                &entity_type,
-                &mut entities,
-                0,
-                &MOCK_STOPWATCH,
-            )
+            .update(&conn, &entity_type, &mut entities, 0, &MOCK_STOPWATCH)
             .expect("Failed to update");
 
         // check updates took effect
@@ -711,7 +695,6 @@ fn serialize_bigdecimal() {
             let mut entities = vec![(&key, Cow::Borrowed(&entity))];
             layout
                 .update(
-                    &*LOGGER,
                     &conn,
                     &entity_type,
                     entities.as_mut_slice(),

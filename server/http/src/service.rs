@@ -97,13 +97,13 @@ where
         let mut version = ApiVersion::default();
 
         if let Some(query) = request.uri().query() {
-            let potential_version_requirement = query.split("&").find_map(|pair| {
+            let potential_version_requirement = query.split('&').find_map(|pair| {
                 if pair.starts_with("api-version=") {
-                    if let Some(version_requirement) = pair.split("=").nth(1) {
+                    if let Some(version_requirement) = pair.split('=').nth(1) {
                         return Some(version_requirement);
                     }
                 }
-                return None;
+                None
             });
 
             if let Some(version_requirement) = potential_version_requirement {
@@ -111,7 +111,7 @@ where
                     &VersionReq::parse(version_requirement)
                         .map_err(|error| GraphQLServerError::ClientError(error.to_string()))?,
                 )
-                .map_err(|error| GraphQLServerError::ClientError(error))?;
+                .map_err(GraphQLServerError::ClientError)?;
             }
         }
 
@@ -128,11 +128,8 @@ where
             GraphQLServerError::ClientError(format!("Invalid subgraph name {:?}", subgraph_name))
         })?;
 
-        self.handle_graphql_query(
-            QueryTarget::Name(subgraph_name, version),
-            request.into_body(),
-        )
-        .await
+        self.handle_graphql_query(QueryTarget::Name(subgraph_name, version), request)
+            .await
     }
 
     fn handle_graphql_query_by_id(
@@ -150,7 +147,7 @@ where
         match res {
             Err(_) => self.handle_not_found(),
             Ok((id, version)) => self
-                .handle_graphql_query(QueryTarget::Deployment(id, version), request.into_body())
+                .handle_graphql_query(QueryTarget::Deployment(id, version), request)
                 .boxed(),
         }
     }
@@ -158,15 +155,27 @@ where
     async fn handle_graphql_query(
         self,
         target: QueryTarget,
-        request_body: Body,
+        request: Request<Body>,
     ) -> GraphQLServiceResult {
         let service = self.clone();
 
         let start = Instant::now();
-        let body = hyper::body::to_bytes(request_body)
+        let trace = {
+            !ENV_VARS.graphql.query_trace_token.is_empty()
+                && request
+                    .headers()
+                    .get("X-GraphTraceQuery")
+                    .map(|v| {
+                        v.to_str()
+                            .map(|s| s == &ENV_VARS.graphql.query_trace_token)
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false)
+        };
+        let body = hyper::body::to_bytes(request.into_body())
             .map_err(|_| GraphQLServerError::InternalError("Failed to read request body".into()))
             .await?;
-        let query = parse_graphql_request(&body);
+        let query = parse_graphql_request(&body, trace);
         let query_parsing_time = start.elapsed();
 
         let result = match query {
@@ -370,6 +379,7 @@ mod tests {
         fn observe_query_execution(&self, _duration: Duration, _results: &QueryResults) {}
         fn observe_query_parsing(&self, _duration: Duration, _results: &QueryResults) {}
         fn observe_query_validation(&self, _duration: Duration, _id: &DeploymentHash) {}
+        fn observe_query_validation_error(&self, _error_codes: Vec<&str>, _id: &DeploymentHash) {}
     }
 
     #[async_trait]

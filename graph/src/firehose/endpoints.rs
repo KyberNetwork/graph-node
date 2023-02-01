@@ -14,6 +14,7 @@ use http::uri::{Scheme, Uri};
 use slog::Logger;
 use std::{collections::BTreeMap, fmt::Display, sync::Arc, time::Duration};
 use tonic::{
+    codegen::CompressionEncoding,
     metadata::MetadataValue,
     transport::{Channel, ClientTlsConfig},
     Request,
@@ -109,10 +110,10 @@ impl FirehoseEndpoint {
                 Ok(r)
             },
         )
-        .accept_gzip();
+        .accept_compressed(CompressionEncoding::Gzip);
 
         if self.compression_enabled {
-            client = client.send_gzip();
+            client = client.send_compressed(CompressionEncoding::Gzip);
         }
 
         debug!(
@@ -174,10 +175,10 @@ impl FirehoseEndpoint {
                 Ok(r)
             },
         )
-        .accept_gzip();
+        .accept_compressed(CompressionEncoding::Gzip);
 
         if self.compression_enabled {
-            client = client.send_gzip();
+            client = client.send_compressed(CompressionEncoding::Gzip);
         }
 
         debug!(
@@ -268,9 +269,9 @@ impl FirehoseEndpoint {
                 Ok(r)
             },
         )
-        .accept_gzip();
+        .accept_compressed(CompressionEncoding::Gzip);
         if self.compression_enabled {
-            client = client.send_gzip();
+            client = client.send_compressed(CompressionEncoding::Gzip);
         }
 
         let response_stream = client.blocks(request).await?;

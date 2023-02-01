@@ -7,13 +7,16 @@ use diesel::sql_types::{Integer, Range};
 use std::io::Write;
 use std::ops::{Bound, RangeBounds, RangeFrom};
 
-use graph::prelude::{BlockNumber, BlockPtr, BLOCK_NUMBER_MAX};
+use graph::prelude::{lazy_static, BlockNumber, BlockPtr, BLOCK_NUMBER_MAX};
 
-use crate::relational::Table;
+use crate::relational::{SqlName, Table};
 
 /// The name of the column in which we store the block range for mutable
 /// entities
 pub(crate) const BLOCK_RANGE_COLUMN: &str = "block_range";
+
+/// The name of the column that stores the causality region of an entity.
+pub(crate) const CAUSALITY_REGION_COLUMN: &str = "causality_region";
 
 /// The SQL clause we use to check that an entity version is current;
 /// that version has an unbounded block range, but checking for
@@ -38,6 +41,12 @@ pub(crate) const UNVERSIONED_RANGE: (Bound<i32>, Bound<i32>) =
 /// The name of the column in which we store the block from which an
 /// immutable entity is visible
 pub(crate) const BLOCK_COLUMN: &str = "block$";
+
+lazy_static! {
+    pub(crate) static ref BLOCK_RANGE_COLUMN_SQL: SqlName =
+        SqlName::verbatim(BLOCK_RANGE_COLUMN.to_string());
+    pub(crate) static ref BLOCK_COLUMN_SQL: SqlName = SqlName::verbatim(BLOCK_COLUMN.to_string());
+}
 
 /// The range of blocks for which an entity is valid. We need this struct
 /// to bind ranges into Diesel queries.

@@ -43,6 +43,12 @@ impl From<String> for Word {
     }
 }
 
+impl From<Word> for String {
+    fn from(w: Word) -> Self {
+        w.0.into()
+    }
+}
+
 impl Serialize for Word {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -137,7 +143,7 @@ impl Iterator for ObjectOwningIter {
     type Item = (Word, Value);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(entry) = self.iter.next() {
+        for entry in self.iter.by_ref() {
             if let Some(key) = entry.key {
                 return Some((key, entry.value));
             }
@@ -173,7 +179,7 @@ impl<'a> Iterator for ObjectIter<'a> {
     type Item = (&'a str, &'a Value);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(entry) = self.iter.next() {
+        for entry in self.iter.by_ref() {
             if let Some(key) = &entry.key {
                 return Some((key.as_str(), &entry.value));
             }

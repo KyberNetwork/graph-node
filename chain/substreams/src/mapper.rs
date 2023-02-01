@@ -33,7 +33,7 @@ impl SubstreamsMapper<Chain> for Mapper {
             )
         });
 
-        if outputs.len() == 0 {
+        if outputs.is_empty() {
             return Ok(None);
         }
 
@@ -98,7 +98,7 @@ impl SubstreamsMapper<Chain> for Mapper {
                     }
                 }
             }
-            Some(Data::StoreDeltas(_)) => Err(UnexpectedStoreDeltaOutput),
+            Some(Data::DebugStoreDeltas(_)) => Err(UnexpectedStoreDeltaOutput),
             _ => Err(SubstreamsError::ModuleOutputNotPresentOrUnexpected),
         }
     }

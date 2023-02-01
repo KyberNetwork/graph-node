@@ -28,7 +28,7 @@ use crate::{
     blockchain::{BlockPtr, Blockchain, DataSource as _},
     components::{
         link_resolver::LinkResolver,
-        store::{DeploymentLocator, StoreError, SubgraphStore},
+        store::{StoreError, SubgraphStore},
     },
     data::{
         graphql::TryFromValue,
@@ -304,8 +304,6 @@ pub enum SubgraphAssignmentProviderError {
     /// Occurs when attempting to remove a subgraph that's not hosted.
     #[error("Subgraph with ID {0} already running")]
     AlreadyRunning(DeploymentHash),
-    #[error("Subgraph with ID {0} is not running")]
-    NotRunning(DeploymentLocator),
     #[error("Subgraph provider error: {0}")]
     Unknown(#[from] anyhow::Error),
 }
@@ -469,7 +467,7 @@ impl Graft {
             //
             // The developer should change their `graft.block` in the manifest
             // to `base.block - 1` or less.
-            (Some(ptr), false) if !(self.block < ptr.number) => Err(GraftBaseInvalid(format!(
+            (Some(ptr), false) if self.block >= ptr.number => Err(GraftBaseInvalid(format!(
                 "failed to graft onto `{}` at block {} since it's not healthy. You can graft it starting at block {} backwards",
                 self.base, self.block, ptr.number - 1
             ))),
@@ -729,18 +727,18 @@ impl<C: Blockchain> UnresolvedSubgraphManifest<C> {
         }
 
         let (schema, data_sources, templates) = try_join3(
-            schema.resolve(id.clone(), &resolver, logger),
+            schema.resolve(id.clone(), resolver, logger),
             data_sources
                 .into_iter()
                 .enumerate()
-                .map(|(idx, ds)| ds.resolve(&resolver, logger, idx as u32))
+                .map(|(idx, ds)| ds.resolve(resolver, logger, idx as u32))
                 .collect::<FuturesOrdered<_>>()
                 .try_collect::<Vec<_>>(),
             templates
                 .into_iter()
                 .enumerate()
                 .map(|(idx, template)| {
-                    template.resolve(&resolver, logger, ds_count as u32 + idx as u32)
+                    template.resolve(resolver, logger, ds_count as u32 + idx as u32)
                 })
                 .collect::<FuturesOrdered<_>>()
                 .try_collect::<Vec<_>>(),

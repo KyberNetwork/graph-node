@@ -17,7 +17,7 @@ use graph::data::subgraph::{
     SubgraphFeature,
 };
 use graph::data_source::{
-    offchain, DataSource, DataSourceCreationError, DataSourceTemplate, TriggerData,
+    offchain, CausalityRegion, DataSource, DataSourceCreationError, DataSourceTemplate, TriggerData,
 };
 use graph::env::EnvVars;
 use graph::prelude::*;
@@ -398,7 +398,7 @@ where
 
         let err_count = block_state.deterministic_errors.len();
         for (i, e) in block_state.deterministic_errors.iter().enumerate() {
-            let message = format!("{:#}", e).replace("\n", "\t");
+            let message = format!("{:#}", e).replace('\n', "\t");
             error!(&logger, "Subgraph error {}/{}", i + 1, err_count;
                 "error" => message,
                 "code" => LogCode::SubgraphSyncingFailure
@@ -567,7 +567,7 @@ where
                         this data source";
                         "name" => &data_source.name(),
                         "address" => &data_source.address()
-                        .map(|address| hex::encode(address))
+                        .map(hex::encode)
                         .unwrap_or("none".to_string()),
                     )
                 }
@@ -597,7 +597,7 @@ where
                 self.logger,
                 "Persisting data_source";
                 "name" => &data_source.name(),
-                "address" => &data_source.address().map(|address| hex::encode(address)).unwrap_or("none".to_string()),
+                "address" => &data_source.address().map(hex::encode).unwrap_or("none".to_string()),
             );
             block_state.persist_data_source(data_source.as_stored_dynamic_data_source());
         }
@@ -653,6 +653,7 @@ where
             let mut block_state = BlockState::<C>::new(EmptyStore::new(schema), LfuCache::new());
 
             // PoI ignores offchain events.
+            // See also: poi-ignores-offchain
             let proof_of_indexing = None;
             let causality_region = "";
 
@@ -664,7 +665,7 @@ where
                     &TriggerData::Offchain(trigger),
                     block_state,
                     &proof_of_indexing,
-                    &causality_region,
+                    causality_region,
                     &self.inputs.debug_fork,
                     &self.metrics.subgraph,
                 )
@@ -767,7 +768,7 @@ where
 
         let start = Instant::now();
 
-        let res = self.process_block(&cancel_handle, block, cursor).await;
+        let res = self.process_block(cancel_handle, block, cursor).await;
 
         let elapsed = start.elapsed().as_secs_f64();
         self.metrics
@@ -848,7 +849,7 @@ where
                 self.metrics.stream.deployment_failed.set(1.0);
                 self.revert_state(block_ptr.block_number())?;
 
-                let message = format!("{:#}", e).replace("\n", "\t");
+                let message = format!("{:#}", e).replace('\n', "\t");
                 let err = anyhow!("{}, code: {}", message, LogCode::SubgraphSyncingFailure);
                 let deterministic = e.is_deterministic();
 
@@ -902,7 +903,7 @@ where
                             .unwrap()
                             .remove(&self.inputs.deployment.id);
 
-                        let message = format!("{:#}", e).replace("\n", "\t");
+                        let message = format!("{:#}", e).replace('\n', "\t");
                         error!(self.logger, "Subgraph failed with non-deterministic error: {}", message;
                             "attempt" => self.state.backoff.attempt,
                             "retry_delay_s" => self.state.backoff.delay().as_secs());
@@ -998,7 +999,14 @@ async fn update_proof_of_indexing(
         // Create the special POI entity key specific to this causality_region
         let entity_key = EntityKey {
             entity_type: POI_OBJECT.to_owned(),
+
+            // There are two things called causality regions here, one is the causality region for
+            // the poi which is a string and the PoI entity id. The other is the data source
+            // causality region to which the PoI belongs as an entity. Currently offchain events do
+            // not affect PoI so it is assumed to be `ONCHAIN`.
+            // See also: poi-ignores-offchain
             entity_id: causality_region.into(),
+            causality_region: CausalityRegion::ONCHAIN,
         };
 
         // Grab the current digest attribute on this entity

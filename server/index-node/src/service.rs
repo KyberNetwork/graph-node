@@ -6,7 +6,7 @@ use http::header::{
 use hyper::body::Bytes;
 use hyper::service::Service;
 use hyper::{Body, Method, Request, Response, StatusCode};
-use serde_json;
+
 use std::task::Context;
 use std::task::Poll;
 
@@ -14,7 +14,6 @@ use graph::components::{server::query::GraphQLServerError, store::Store};
 use graph::data::query::QueryResults;
 use graph::prelude::*;
 use graph_graphql::prelude::{execute_query, Query as PreparedQuery, QueryExecutionOptions};
-use graphql_parser;
 
 use crate::auth::bearer_token;
 
@@ -28,6 +27,7 @@ impl GraphQLMetrics for NoopGraphQLMetrics {
     fn observe_query_execution(&self, _duration: Duration, _results: &QueryResults) {}
     fn observe_query_parsing(&self, _duration: Duration, _results: &QueryResults) {}
     fn observe_query_validation(&self, _duration: Duration, _id: &DeploymentHash) {}
+    fn observe_query_validation_error(&self, _error_codes: Vec<&str>, _id: &DeploymentHash) {}
 }
 
 /// An asynchronous response to a GraphQL request.
@@ -111,10 +111,10 @@ where
         Self::serve_file(Self::graphiql_html(), "text/html")
     }
 
-    async fn handle_graphql_query(
+    pub async fn handle_graphql_query(
         &self,
         request: Request<Body>,
-    ) -> Result<Response<Body>, GraphQLServerError> {
+    ) -> Result<QueryResults, GraphQLServerError> {
         let (req_parts, req_body) = request.into_parts();
         let store = self.store.clone();
 
@@ -138,7 +138,7 @@ where
             Arc::new(NoopGraphQLMetrics),
         ) {
             Ok(query) => query,
-            Err(e) => return Ok(QueryResults::from(QueryResult::from(e)).as_http_response()),
+            Err(e) => return Ok(QueryResults::from(QueryResult::from(e))),
         };
 
         let load_manager = self.graphql_runner.load_manager();
@@ -146,7 +146,7 @@ where
         // Run the query using the index node resolver
         let query_clone = query.cheap_clone();
         let logger = self.logger.cheap_clone();
-        let result = {
+        let result: QueryResult = {
             let resolver = IndexNodeResolver::new(
                 &logger,
                 store,
@@ -160,16 +160,15 @@ where
                 max_first: std::u32::MAX,
                 max_skip: std::u32::MAX,
                 load_manager,
+                trace: false,
             };
             let result = execute_query(query_clone.cheap_clone(), None, None, options).await;
             query_clone.log_execution(0);
-            QueryResult::from(
-                // Index status queries are not cacheable, so we may unwrap this.
-                Arc::try_unwrap(result).unwrap(),
-            )
+            // Index status queries are not cacheable, so we may unwrap this.
+            Arc::try_unwrap(result).unwrap()
         };
 
-        Ok(QueryResults::from(result).as_http_response())
+        Ok(QueryResults::from(result))
     }
 
     // Handles OPTIONS requests
@@ -240,7 +239,9 @@ where
             }
             (Method::GET, ["graphql", "playground"]) => Ok(Self::handle_graphiql()),
 
-            (Method::POST, ["graphql"]) => self.handle_graphql_query(req).await,
+            (Method::POST, ["graphql"]) => {
+                Ok(self.handle_graphql_query(req).await?.as_http_response())
+            }
             (Method::OPTIONS, ["graphql"]) => Ok(Self::handle_graphql_options(req)),
 
             (Method::GET, ["explorer", rest @ ..]) => self.explorer.handle(&self.logger, rest),
@@ -354,7 +355,7 @@ impl ValidatedRequest {
             )),
         }?;
 
-        let query = Query::new(document, variables);
+        let query = Query::new(document, variables, false);
         let bearer_token = bearer_token(headers)
             .map(<[u8]>::to_vec)
             .map(String::from_utf8)
@@ -373,7 +374,7 @@ impl ValidatedRequest {
 #[cfg(test)]
 mod tests {
     use graph::{data::value::Object, prelude::*};
-    use graphql_parser;
+
     use hyper::body::Bytes;
     use hyper::HeaderMap;
     use std::collections::HashMap;

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context};
 use graph::cheap_clone::CheapClone;
 use graph::prelude::rand::{self, seq::IteratorRandom};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -64,8 +65,7 @@ impl EthereumNetworkAdapters {
         // EthereumAdapters are sorted by their NodeCapabilities when the EthereumNetworks
         // struct is instantiated so they do not need to be sorted here
         self.adapters
-            .iter()
-            .next()
+            .first()
             .map(|ethereum_network_adapter| ethereum_network_adapter.adapter.clone())
     }
 
@@ -100,7 +100,7 @@ impl EthereumNetworks {
             .or_insert(EthereumNetworkAdapters { adapters: vec![] });
         network_adapters.adapters.push(EthereumNetworkAdapter {
             capabilities,
-            adapter: adapter.clone(),
+            adapter,
             limit,
         });
     }
@@ -135,9 +135,14 @@ impl EthereumNetworks {
 
     pub fn sort(&mut self) {
         for adapters in self.networks.values_mut() {
-            adapters
-                .adapters
-                .sort_by_key(|adapter| adapter.capabilities)
+            adapters.adapters.sort_by(|a, b| {
+                a.capabilities
+                    .partial_cmp(&b.capabilities)
+                    // We can't define a total ordering over node capabilities,
+                    // so incomparable items are considered equal and end up
+                    // near each other.
+                    .unwrap_or(Ordering::Equal)
+            })
         }
     }
 

@@ -94,7 +94,7 @@ impl ForeignServer {
                 })?
                 .into(),
         )?;
-        let port = config.get_ports().get(0).cloned().unwrap_or(5432u16);
+        let port = config.get_ports().first().cloned().unwrap_or(5432u16);
         let dbname = config
             .get_dbname()
             .map(|s| s.to_string())
@@ -980,6 +980,7 @@ impl PoolInner {
         let conn = self.get().map_err(|_| StoreError::DatabaseUnavailable)?;
 
         let start = Instant::now();
+
         advisory_lock::lock_migration(&conn)
             .unwrap_or_else(|err| die(&pool.logger, "failed to get migration lock", &err));
         // This code can cause a race in database setup: if pool A has had
@@ -1010,6 +1011,21 @@ impl PoolInner {
             die(&pool.logger, "failed to release migration lock", &err);
         });
         result.unwrap_or_else(|err| die(&pool.logger, "migrations failed", &err));
+
+        // Locale check
+        if let Err(msg) = catalog::Locale::load(&conn)?.suitable() {
+            if &self.shard == &*PRIMARY_SHARD && primary::is_empty(&conn)? {
+                die(
+                    &pool.logger,
+                    "Database does not use C locale. \
+                    Please check the graph-node documentation for how to set up the database locale",
+                    &msg,
+                );
+            } else {
+                warn!(pool.logger, "{}.\nPlease check the graph-node documentation for how to set up the database locale", msg);
+            }
+        }
+
         debug!(&pool.logger, "Setup finished"; "setup_time_s" => start.elapsed().as_secs());
         Ok(())
     }
@@ -1197,12 +1213,7 @@ impl PoolCoordinator {
     }
 
     pub fn pools(&self) -> Vec<Arc<PoolInner>> {
-        self.pools
-            .lock()
-            .unwrap()
-            .values()
-            .map(|pool| pool.clone())
-            .collect()
+        self.pools.lock().unwrap().values().cloned().collect()
     }
 
     pub fn servers(&self) -> Arc<Vec<ForeignServer>> {

@@ -13,11 +13,14 @@ use diesel::{
     sql_query,
     sql_types::{Nullable, Text},
 };
-use graph::prelude::{
-    anyhow, bigdecimal::ToPrimitive, hex, web3::types::H256, BigDecimal, BlockNumber, BlockPtr,
-    DeploymentHash, DeploymentState, Schema, StoreError,
-};
 use graph::{blockchain::block_stream::FirehoseCursor, data::subgraph::schema::SubgraphError};
+use graph::{
+    components::store::EntityType,
+    prelude::{
+        anyhow, bigdecimal::ToPrimitive, hex, web3::types::H256, BigDecimal, BlockNumber, BlockPtr,
+        DeploymentHash, DeploymentState, Schema, StoreError,
+    },
+};
 use graph::{
     data::subgraph::{
         schema::{DeploymentCreate, SubgraphManifestEntity},
@@ -114,6 +117,10 @@ table! {
         start_block_number -> Nullable<Integer>,
         start_block_hash -> Nullable<Binary>,
         raw_yaml -> Nullable<Text>,
+
+        // Entity types that have a `causality_region` column.
+        // Names stored as present in the schema, not in snake case.
+        entities_with_causality_region -> Array<Text>,
     }
 }
 
@@ -257,7 +264,7 @@ pub fn manifest_info(
         .filter(sm::id.eq(site.id))
         .first(conn)?;
     Schema::parse(s.as_str(), site.deployment.clone())
-        .map_err(|e| StoreError::Unknown(e))
+        .map_err(StoreError::Unknown)
         .map(|schema| (schema, description, repository, spec_version))
 }
 
@@ -337,7 +344,7 @@ pub fn transact_block(
 
         // No matching rows were found. This is an error. By the filter conditions, this can only be
         // due to a missing deployment (which `block_ptr` catches) or duplicate block processing.
-        0 => match block_ptr(&conn, &site.deployment)? {
+        0 => match block_ptr(conn, &site.deployment)? {
             Some(block_ptr_from) if block_ptr_from.number >= ptr.number => Err(
                 StoreError::DuplicateBlockProcessing(site.deployment.clone(), ptr.number),
             ),
@@ -769,12 +776,26 @@ pub(crate) fn health(conn: &PgConnection, id: DeploymentId) -> Result<SubgraphHe
         .map_err(|e| e.into())
 }
 
+pub(crate) fn entities_with_causality_region(
+    conn: &PgConnection,
+    id: DeploymentId,
+) -> Result<Vec<EntityType>, StoreError> {
+    use subgraph_manifest as sm;
+
+    sm::table
+        .filter(sm::id.eq(id))
+        .select(sm::entities_with_causality_region)
+        .get_result(conn)
+        .map_err(|e| e.into())
+}
+
 /// Reverts the errors and updates the subgraph health if necessary.
 pub(crate) fn revert_subgraph_errors(
     conn: &PgConnection,
     id: &DeploymentHash,
     reverted_block: BlockNumber,
 ) -> Result<(), StoreError> {
+    use subgraph_deployment as d;
     use subgraph_error as e;
 
     let lower_geq = format!("lower({}) >= ", BLOCK_RANGE_COLUMN);
@@ -788,7 +809,21 @@ pub(crate) fn revert_subgraph_errors(
     // The result will be the same at `reverted_block` or `reverted_block - 1` since the errors at
     // `reverted_block` were just deleted, but semantically we care about `reverted_block - 1` which
     // is the block being reverted to.
-    check_health(conn, id, reverted_block - 1)
+    check_health(conn, id, reverted_block - 1)?;
+
+    // If the deployment is failed in both `failed` and `status` columns,
+    // update both values respectively to `false` and `healthy`. Basically
+    // unfail the statuses.
+    update(
+        d::table
+            .filter(d::deployment.eq(id.as_str()))
+            .filter(d::failed.eq(true))
+            .filter(d::health.eq(SubgraphHealth::Failed)),
+    )
+    .set((d::failed.eq(false), d::health.eq(SubgraphHealth::Healthy)))
+    .execute(conn)
+    .map(|_| ())
+    .map_err(StoreError::from)
 }
 
 pub(crate) fn delete_error(conn: &PgConnection, error_id: &str) -> Result<(), StoreError> {
@@ -911,6 +946,7 @@ pub fn create_deployment(
                 features,
                 schema,
                 raw_yaml,
+                entities_with_causality_region,
             },
         start_block,
         graft_base,
@@ -918,6 +954,7 @@ pub fn create_deployment(
         debug_fork,
     } = deployment;
     let earliest_block_number = start_block.as_ref().map(|ptr| ptr.number).unwrap_or(0);
+    let entities_with_causality_region = Vec::from_iter(entities_with_causality_region.into_iter());
 
     let deployment_values = (
         d::id.eq(site.id),
@@ -953,6 +990,7 @@ pub fn create_deployment(
         m::start_block_hash.eq(b(&start_block)),
         m::start_block_number.eq(start_block.as_ref().map(|ptr| ptr.number)),
         m::raw_yaml.eq(raw_yaml),
+        m::entities_with_causality_region.eq(entities_with_causality_region),
     );
 
     if exists && replace {

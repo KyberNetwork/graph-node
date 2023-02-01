@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -8,7 +9,6 @@ use graph::components::store::EntityKey;
 use graph::components::store::ReadStore;
 use graph::data::subgraph::schema;
 use graph::data_source::CausalityRegion;
-use graph::env::env_var;
 use graph::prelude::{
     BlockNumber, Entity, MetricsRegistry, Schema, SubgraphDeploymentEntity, SubgraphStore as _,
     BLOCK_NUMBER_MAX,
@@ -30,16 +30,6 @@ use store::StoredDynamicDataSource;
 
 use crate::deployment_store::DeploymentStore;
 use crate::{primary, primary::Site, relational::Layout, SubgraphStore};
-
-graph::prelude::lazy_static! {
-    /// The size of the write queue; this many blocks can be buffered for
-    /// writing before calls to transact block operations will block.
-    /// Setting this to `0` disables pipelined writes, and writes will be
-    /// done synchronously.
-    pub static ref WRITE_QUEUE_SIZE: usize = {
-        env_var("GRAPH_STORE_WRITE_QUEUE", 5)
-    };
-}
 
 /// A wrapper around `SubgraphStore` that only exposes functions that are
 /// safe to call from `WritableStore`, i.e., functions that either do not
@@ -285,12 +275,20 @@ impl SyncStore {
 
     fn get_many(
         &self,
-        ids_for_type: BTreeMap<&EntityType, Vec<&str>>,
+        keys: BTreeSet<EntityKey>,
         block: BlockNumber,
-    ) -> Result<BTreeMap<EntityType, Vec<Entity>>, StoreError> {
+    ) -> Result<BTreeMap<EntityKey, Entity>, StoreError> {
+        let mut by_type: BTreeMap<(EntityType, CausalityRegion), Vec<String>> = BTreeMap::new();
+        for key in keys {
+            by_type
+                .entry((key.entity_type, key.causality_region))
+                .or_default()
+                .push(key.entity_id.into());
+        }
+
         self.retry("get_many", || {
             self.writable
-                .get_many(self.site.cheap_clone(), &ids_for_type, block)
+                .get_many(self.site.cheap_clone(), &by_type, block)
         })
     }
 
@@ -736,15 +734,15 @@ impl Queue {
     /// Get many entities at once by looking at both the queue and the store
     fn get_many(
         &self,
-        mut ids_for_type: BTreeMap<&EntityType, Vec<&str>>,
-    ) -> Result<BTreeMap<EntityType, Vec<Entity>>, StoreError> {
+        mut keys: BTreeSet<EntityKey>,
+    ) -> Result<BTreeMap<EntityKey, Entity>, StoreError> {
         // See the implementation of `get` for how we handle reverts
         let mut tracker = BlockTracker::new();
 
         // Get entities from entries in the queue
-        let mut map = self.queue.fold(
+        let entities_in_queue = self.queue.fold(
             BTreeMap::new(),
-            |mut map: BTreeMap<EntityType, Vec<Entity>>, req| {
+            |mut map: BTreeMap<EntityKey, Option<Entity>>, req| {
                 tracker.update(req.as_ref());
                 match req.as_ref() {
                     Request::Write {
@@ -753,26 +751,9 @@ impl Queue {
                         if tracker.visible(block_ptr) {
                             for emod in mods {
                                 let key = emod.entity_ref();
-                                if let Some(ids) = ids_for_type.get_mut(&key.entity_type) {
-                                    if let Some(idx) =
-                                        ids.iter().position(|id| *id == key.entity_id.as_str())
-                                    {
-                                        // We are looking for the entity
-                                        // underlying this modification. Add
-                                        // it to the result map, but also
-                                        // remove it from `ids_for_type` so
-                                        // that we don't look for it any
-                                        // more
-                                        if let Some(entity) = emod.entity() {
-                                            map.entry(key.entity_type.clone())
-                                                .or_default()
-                                                .push(entity.clone());
-                                        }
-                                        ids.swap_remove(idx);
-                                        if ids.is_empty() {
-                                            ids_for_type.remove(&key.entity_type);
-                                        }
-                                    }
+                                // The key must be removed to avoid overwriting it with a stale value.
+                                if let Some(key) = keys.take(key) {
+                                    map.insert(key, emod.entity().cloned());
                                 }
                             }
                         }
@@ -783,20 +764,17 @@ impl Queue {
             },
         );
 
-        // Whatever remains in `ids_for_type` needs to be gotten from the
-        // store. Take extra care to not unnecessarily copy maps
-        if !ids_for_type.is_empty() {
-            let store_map = self.store.get_many(ids_for_type, tracker.query_block())?;
-            if !store_map.is_empty() {
-                if map.is_empty() {
-                    map = store_map
-                } else {
-                    for (entity_type, mut entities) in store_map {
-                        map.entry(entity_type).or_default().append(&mut entities);
-                    }
-                }
+        // Whatever remains in `keys` needs to be gotten from the store
+        let mut map = self.store.get_many(keys, tracker.query_block())?;
+
+        // Extend the store results with the entities from the queue.
+        for (key, entity) in entities_in_queue {
+            if let Some(entity) = entity {
+                let overwrite = map.insert(key, entity).is_some();
+                assert!(!overwrite);
             }
         }
+
         Ok(map)
     }
 
@@ -949,11 +927,11 @@ impl Writer {
 
     fn get_many(
         &self,
-        ids_for_type: BTreeMap<&EntityType, Vec<&str>>,
-    ) -> Result<BTreeMap<EntityType, Vec<Entity>>, StoreError> {
+        keys: BTreeSet<EntityKey>,
+    ) -> Result<BTreeMap<EntityKey, Entity>, StoreError> {
         match self {
-            Writer::Sync(store) => store.get_many(ids_for_type, BLOCK_NUMBER_MAX),
-            Writer::Async(queue) => queue.get_many(ids_for_type),
+            Writer::Sync(store) => store.get_many(keys, BLOCK_NUMBER_MAX),
+            Writer::Async(queue) => queue.get_many(keys),
         }
     }
 
@@ -1034,9 +1012,9 @@ impl ReadStore for WritableStore {
 
     fn get_many(
         &self,
-        ids_for_type: BTreeMap<&EntityType, Vec<&str>>,
-    ) -> Result<BTreeMap<EntityType, Vec<Entity>>, StoreError> {
-        self.writer.get_many(ids_for_type)
+        keys: BTreeSet<EntityKey>,
+    ) -> Result<BTreeMap<EntityKey, Entity>, StoreError> {
+        self.writer.get_many(keys)
     }
 
     fn input_schema(&self) -> Arc<Schema> {

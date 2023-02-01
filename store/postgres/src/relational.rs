@@ -14,6 +14,7 @@ mod ddl_tests;
 #[cfg(test)]
 mod query_tests;
 
+pub(crate) mod index;
 mod prune;
 
 use diesel::{connection::SimpleConnection, Connection};
@@ -23,11 +24,12 @@ use graph::constraint_violation;
 use graph::data::graphql::TypeExt as _;
 use graph::data::query::Trace;
 use graph::data::value::Word;
-use graph::prelude::{q, s, StopwatchMetrics, ENV_VARS};
-use graph::slog::{debug, warn};
+use graph::data_source::CausalityRegion;
+use graph::prelude::{q, s, EntityQuery, StopwatchMetrics, ENV_VARS};
+use graph::slog::warn;
 use inflector::Inflector;
 use lazy_static::lazy_static;
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::convert::{From, TryFrom};
 use std::fmt::{self, Write};
@@ -49,9 +51,8 @@ use graph::data::schema::{FulltextConfig, FulltextDefinition, Schema, SCHEMA_TYP
 use graph::data::store::BYTES_SCALAR;
 use graph::data::subgraph::schema::{POI_OBJECT, POI_TABLE};
 use graph::prelude::{
-    anyhow, info, BlockNumber, DeploymentHash, Entity, EntityChange, EntityCollection,
-    EntityFilter, EntityOperation, EntityOrder, EntityRange, Logger, QueryExecutionError,
-    StoreError, StoreEvent, ValueType, BLOCK_NUMBER_MAX,
+    anyhow, info, BlockNumber, DeploymentHash, Entity, EntityChange, EntityOperation, Logger,
+    QueryExecutionError, StoreError, StoreEvent, ValueType, BLOCK_NUMBER_MAX,
 };
 
 use crate::block_range::{BLOCK_COLUMN, BLOCK_RANGE_COLUMN};
@@ -59,7 +60,6 @@ pub use crate::catalog::Catalog;
 use crate::connection_pool::ForeignServer;
 use crate::{catalog, deployment};
 
-const POSTGRES_MAX_PARAMETERS: usize = u16::MAX as usize; // 65535
 const DELETE_OPERATION_CHUNK_SIZE: usize = 1_000;
 
 /// The size of string prefixes that we index. This is chosen so that we
@@ -90,7 +90,7 @@ lazy_static! {
 /// Postgres, we would create the same table twice. We consider this case
 /// to be pathological and so unlikely in practice that we do not try to work
 /// around it in the application.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Hash, Ord)]
 pub struct SqlName(String);
 
 impl SqlName {
@@ -159,6 +159,12 @@ impl From<String> for SqlName {
 impl fmt::Display for SqlName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl Borrow<str> for &SqlName {
+    fn borrow(&self) -> &str {
+        self.as_str()
     }
 }
 
@@ -308,6 +314,9 @@ impl Layout {
                     &enums,
                     &id_types,
                     i as u32,
+                    catalog
+                        .entities_with_causality_region
+                        .contains(&EntityType::from(obj_type.clone())),
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -388,6 +397,7 @@ impl Layout {
             position: position as u32,
             is_account_like: false,
             immutable: false,
+            has_causality_region: false,
         }
     }
 
@@ -399,8 +409,9 @@ impl Layout {
         conn: &PgConnection,
         site: Arc<Site>,
         schema: &Schema,
+        entities_with_causality_region: BTreeSet<EntityType>,
     ) -> Result<Layout, StoreError> {
-        let catalog = Catalog::for_creation(site.cheap_clone());
+        let catalog = Catalog::for_creation(site.cheap_clone(), entities_with_causality_region);
         let layout = Self::new(site, schema, catalog)?;
         let sql = layout
             .as_ddl()
@@ -479,31 +490,31 @@ impl Layout {
     pub fn find(
         &self,
         conn: &PgConnection,
-        entity: &EntityType,
-        id: &str,
+        key: &EntityKey,
         block: BlockNumber,
     ) -> Result<Option<Entity>, StoreError> {
-        let table = self.table_for_entity(entity)?;
-        FindQuery::new(table.as_ref(), id, block)
+        let table = self.table_for_entity(&key.entity_type)?;
+        FindQuery::new(table.as_ref(), key, block)
             .get_result::<EntityData>(conn)
             .optional()?
             .map(|entity_data| entity_data.deserialize_with_layout(self, None, true))
             .transpose()
     }
 
+    // An optimization when looking up multiple entities, it will generate a single sql query using `UNION ALL`.
     pub fn find_many(
         &self,
         conn: &PgConnection,
-        ids_for_type: &BTreeMap<&EntityType, Vec<&str>>,
+        ids_for_type: &BTreeMap<(EntityType, CausalityRegion), Vec<String>>,
         block: BlockNumber,
-    ) -> Result<BTreeMap<EntityType, Vec<Entity>>, StoreError> {
+    ) -> Result<BTreeMap<EntityKey, Entity>, StoreError> {
         if ids_for_type.is_empty() {
             return Ok(BTreeMap::new());
         }
 
         let mut tables = Vec::new();
-        for entity_type in ids_for_type.keys() {
-            tables.push(self.table_for_entity(entity_type)?.as_ref());
+        for (entity_type, cr) in ids_for_type.keys() {
+            tables.push((self.table_for_entity(entity_type)?.as_ref(), *cr));
         }
         let query = FindManyQuery {
             _namespace: &self.catalog.site.namespace,
@@ -511,17 +522,22 @@ impl Layout {
             tables,
             block,
         };
-        let mut entities_for_type: BTreeMap<EntityType, Vec<Entity>> = BTreeMap::new();
+        let mut entities: BTreeMap<EntityKey, Entity> = BTreeMap::new();
         for data in query.load::<EntityData>(conn)? {
             let entity_type = data.entity_type();
             let entity_data: Entity = data.deserialize_with_layout(self, None, true)?;
 
-            entities_for_type
-                .entry(entity_type)
-                .or_default()
-                .push(entity_data);
+            let key = EntityKey {
+                entity_type,
+                entity_id: entity_data.id()?.into(),
+                causality_region: CausalityRegion::from_entity(&entity_data),
+            };
+            let overwrite = entities.insert(key, entity_data).is_some();
+            if overwrite {
+                return Err(constraint_violation!("duplicate entity in result set"));
+            }
         }
-        Ok(entities_for_type)
+        Ok(entities)
     }
 
     pub fn find_changes(
@@ -548,18 +564,15 @@ impl Layout {
 
         for entity_data in inserts_or_updates.into_iter() {
             let entity_type = entity_data.entity_type();
-            let mut data: Entity = entity_data.deserialize_with_layout(self, None, false)?;
+            let data: Entity = entity_data.deserialize_with_layout(self, None, true)?;
             let entity_id = Word::from(data.id().expect("Invalid ID for entity."));
             processed_entities.insert((entity_type.clone(), entity_id.clone()));
-
-            // `__typename` is not a real field.
-            data.remove("__typename")
-                .expect("__typename expected; this is a bug");
 
             changes.push(EntityOperation::Set {
                 key: EntityKey {
                     entity_type,
                     entity_id,
+                    causality_region: CausalityRegion::from_entity(&data),
                 },
                 data,
             });
@@ -576,6 +589,7 @@ impl Layout {
                     key: EntityKey {
                         entity_type,
                         entity_id,
+                        causality_region: del.causality_region(),
                     },
                 });
             }
@@ -586,7 +600,6 @@ impl Layout {
 
     pub fn insert<'a>(
         &'a self,
-        logger: &Logger,
         conn: &PgConnection,
         entity_type: &'a EntityType,
         entities: &'a mut [(&'a EntityKey, Cow<'a, Entity>)],
@@ -596,15 +609,14 @@ impl Layout {
         let table = self.table_for_entity(entity_type)?;
         let _section = stopwatch.start_section("insert_modification_insert_query");
         let mut count = 0;
-        // Each operation must respect the maximum number of bindings allowed in PostgreSQL queries,
-        // so we need to act in chunks whose size is defined by the number of entities times the
-        // number of attributes each entity type has.
-        // We add 1 to account for the `block_range` bind parameter
-        let chunk_size = POSTGRES_MAX_PARAMETERS / (table.columns.len() + 1);
+
+        // We insert the entities in chunks to make sure each operation does
+        // not exceed the maximum number of bindings allowed in queries
+        let chunk_size = InsertQuery::chunk_size(table);
         for chunk in entities.chunks_mut(chunk_size) {
-            let query = InsertQuery::new(table, chunk, block)?;
-            debug!(logger, "Insert Query"; "query" => format!("{}", debug_query(&query)));
-            count += query.get_results(conn).map(|ids| ids.len())?
+            count += InsertQuery::new(table, chunk, block)?
+                .get_results(conn)
+                .map(|ids| ids.len())?
         }
         Ok(count)
     }
@@ -626,54 +638,60 @@ impl Layout {
         &self,
         logger: &Logger,
         conn: &PgConnection,
-        collection: EntityCollection,
-        filter: Option<EntityFilter>,
-        order: EntityOrder,
-        range: EntityRange,
-        block: BlockNumber,
-        query_id: Option<String>,
+        query: EntityQuery,
     ) -> Result<(Vec<T>, Trace), QueryExecutionError> {
         fn log_query_timing(
             logger: &Logger,
             query: &FilterQuery,
             elapsed: Duration,
             entity_count: usize,
+            trace: bool,
         ) -> Trace {
             // 20kB
             const MAXLEN: usize = 20_480;
 
-            if !ENV_VARS.log_sql_timing() {
+            if !ENV_VARS.log_sql_timing() && !trace {
                 return Trace::None;
             }
 
             let mut text = debug_query(&query).to_string().replace("\n", "\t");
-            let trace = Trace::query(&text, elapsed, entity_count);
 
-            // If the query + bind variables is more than MAXLEN, truncate it;
-            // this will happen when queries have very large bind variables
-            // (e.g., long arrays of string ids)
-            if text.len() > MAXLEN {
-                text.truncate(MAXLEN);
-                text.push_str(" ...");
+            let trace = if trace {
+                Trace::query(&text, elapsed, entity_count)
+            } else {
+                Trace::None
+            };
+
+            if ENV_VARS.log_sql_timing() {
+                // If the query + bind variables is more than MAXLEN, truncate it;
+                // this will happen when queries have very large bind variables
+                // (e.g., long arrays of string ids)
+                if text.len() > MAXLEN {
+                    text.truncate(MAXLEN);
+                    text.push_str(" ...");
+                }
+                info!(
+                    logger,
+                    "Query timing (SQL)";
+                    "query" => text,
+                    "time_ms" => elapsed.as_millis(),
+                    "entity_count" => entity_count
+                );
             }
-            info!(
-                logger,
-                "Query timing (SQL)";
-                "query" => text,
-                "time_ms" => elapsed.as_millis(),
-                "entity_count" => entity_count
-            );
             trace
         }
 
-        let filter_collection = FilterCollection::new(self, collection, filter.as_ref(), block)?;
+        let trace = query.trace;
+
+        let filter_collection =
+            FilterCollection::new(self, query.collection, query.filter.as_ref(), query.block)?;
         let query = FilterQuery::new(
             &filter_collection,
-            filter.as_ref(),
-            order,
-            range,
-            block,
-            query_id,
+            query.filter.as_ref(),
+            query.order,
+            query.range,
+            query.block,
+            query.query_id,
             &self.site,
         )?;
         let query_clone = query.clone();
@@ -712,7 +730,7 @@ impl Layout {
                     )),
                 }
             })?;
-        let trace = log_query_timing(logger, &query_clone, start.elapsed(), values.len());
+        let trace = log_query_timing(logger, &query_clone, start.elapsed(), values.len(), trace);
 
         let parent_type = filter_collection.parent_type()?.map(ColumnType::from);
         values
@@ -728,7 +746,6 @@ impl Layout {
 
     pub fn update<'a>(
         &'a self,
-        logger: &Logger,
         conn: &PgConnection,
         entity_type: &'a EntityType,
         entities: &'a mut [(&'a EntityKey, Cow<'a, Entity>)],
@@ -755,27 +772,17 @@ impl Layout {
             .collect();
 
         let section = stopwatch.start_section("update_modification_clamp_range_query");
-        let clamp_range_query = ClampRangeQuery::new(table, &entity_keys, block)?;
-        debug!(
-            logger, "Clamp_Range_Query";
-            "table" => table.name.as_str(),
-            "query" => format!("{}", debug_query(&clamp_range_query)),
-        );
-        clamp_range_query.execute(conn)?;
+        ClampRangeQuery::new(table, &entity_keys, block)?.execute(conn)?;
         section.end();
 
         let _section = stopwatch.start_section("update_modification_insert_query");
         let mut count = 0;
 
-        // Each operation must respect the maximum number of bindings allowed in PostgreSQL queries,
-        // so we need to act in chunks whose size is defined by the number of entities times the
-        // number of attributes each entity type has.
-        // We add 1 to account for the `block_range` bind parameter
-        let chunk_size = POSTGRES_MAX_PARAMETERS / (table.columns.len() + 1);
+        // We insert the entities in chunks to make sure each operation does
+        // not exceed the maximum number of bindings allowed in queries
+        let chunk_size = InsertQuery::chunk_size(table);
         for chunk in entities.chunks_mut(chunk_size) {
-            let query = InsertQuery::new(table, chunk, block)?;
-            debug!(logger, "Update Query"; "query" => format!("{}", debug_query(&query)));
-            count += query.execute(conn)?;
+            count += InsertQuery::new(table, chunk, block)?.execute(conn)?;
         }
         Ok(count)
     }
@@ -1217,6 +1224,10 @@ pub struct Table {
     /// Entities in this table are immutable, i.e., will never be updated or
     /// deleted
     pub(crate) immutable: bool,
+
+    /// Whether this table has an explicit `causality_region` column. If `false`, then the column is
+    /// not present and the causality region for all rows is implicitly `0` (equivalent to CasualityRegion::ONCHAIN).
+    pub(crate) has_causality_region: bool,
 }
 
 impl Table {
@@ -1227,6 +1238,7 @@ impl Table {
         enums: &EnumMap,
         id_types: &IdTypeMap,
         position: u32,
+        has_causality_region: bool,
     ) -> Result<Table, StoreError> {
         SqlName::check_valid_identifier(&*defn.name, "object")?;
 
@@ -1252,6 +1264,7 @@ impl Table {
             columns,
             position,
             immutable,
+            has_causality_region,
         };
         Ok(table)
     }
@@ -1267,6 +1280,7 @@ impl Table {
             is_account_like: self.is_account_like,
             position: self.position,
             immutable: self.immutable,
+            has_causality_region: self.has_causality_region,
         };
 
         Arc::new(other)
@@ -1326,6 +1340,14 @@ impl Table {
         conn.execute(&sql)?;
         Ok(())
     }
+
+    pub(crate) fn block_column(&self) -> &SqlName {
+        if self.immutable {
+            &*crate::block_range::BLOCK_COLUMN_SQL
+        } else {
+            &*crate::block_range::BLOCK_RANGE_COLUMN_SQL
+        }
+    }
 }
 
 /// Return the enclosed named type for a field type, i.e., the type after
@@ -1373,7 +1395,8 @@ impl LayoutCache {
 
     fn load(conn: &PgConnection, site: Arc<Site>) -> Result<Arc<Layout>, StoreError> {
         let (subgraph_schema, use_bytea_prefix) = deployment::schema(conn, site.as_ref())?;
-        let catalog = Catalog::load(conn, site.clone(), use_bytea_prefix)?;
+        let has_causality_region = deployment::entities_with_causality_region(conn, site.id)?;
+        let catalog = Catalog::load(conn, site.clone(), use_bytea_prefix, has_causality_region)?;
         let layout = Arc::new(Layout::new(site.clone(), &subgraph_schema, catalog)?);
         layout.refresh(conn, site)
     }

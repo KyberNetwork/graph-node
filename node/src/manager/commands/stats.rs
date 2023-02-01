@@ -6,6 +6,7 @@ use crate::manager::deployment::DeploymentSearch;
 use diesel::r2d2::ConnectionManager;
 use diesel::r2d2::PooledConnection;
 use diesel::PgConnection;
+use graph::components::store::DeploymentLocator;
 use graph::components::store::VersionStats;
 use graph::prelude::anyhow;
 use graph_store_postgres::command_support::catalog as store_catalog;
@@ -118,9 +119,83 @@ pub fn analyze(
     store: Arc<SubgraphStore>,
     pool: ConnectionPool,
     search: DeploymentSearch,
-    entity_name: &str,
+    entity_name: Option<&str>,
 ) -> Result<(), anyhow::Error> {
     let locator = search.locate_unique(&pool)?;
-    println!("Analyzing table sgd{}.{entity_name}", locator.id);
+    analyze_loc(store, &locator, entity_name)
+}
+
+fn analyze_loc(
+    store: Arc<SubgraphStore>,
+    locator: &DeploymentLocator,
+    entity_name: Option<&str>,
+) -> Result<(), anyhow::Error> {
+    match entity_name {
+        Some(entity_name) => println!("Analyzing table sgd{}.{entity_name}", locator.id),
+        None => println!("Analyzing all tables for sgd{}", locator.id),
+    }
     store.analyze(&locator, entity_name).map_err(|e| anyhow!(e))
+}
+
+pub fn target(
+    store: Arc<SubgraphStore>,
+    primary: ConnectionPool,
+    search: &DeploymentSearch,
+) -> Result<(), anyhow::Error> {
+    let locator = search.locate_unique(&primary)?;
+    let (default, targets) = store.stats_targets(&locator)?;
+
+    let has_targets = targets
+        .values()
+        .any(|cols| cols.values().any(|target| *target > 0));
+
+    if has_targets {
+        println!(
+            "{:^74}",
+            format!(
+                "Statistics targets for sgd{} (default: {default})",
+                locator.id
+            )
+        );
+        println!("{:^30} | {:^30} | {:^8}", "table", "column", "target");
+        println!("{:-^30}-+-{:-^30}-+-{:-^8}", "", "", "");
+        for (table, columns) in targets {
+            for (column, target) in columns {
+                if target > 0 {
+                    println!("{:<30} | {:<30} | {:>8}", table, column, target);
+                }
+            }
+        }
+    } else {
+        println!(
+            "no statistics targets set for sgd{}, global default is {default}",
+            locator.id
+        );
+    }
+    Ok(())
+}
+
+pub fn set_target(
+    store: Arc<SubgraphStore>,
+    primary: ConnectionPool,
+    search: &DeploymentSearch,
+    entity: Option<&str>,
+    columns: Vec<String>,
+    target: i32,
+    no_analyze: bool,
+) -> Result<(), anyhow::Error> {
+    let columns = if columns.is_empty() {
+        vec!["id".to_string(), "block_range".to_string()]
+    } else {
+        columns
+    };
+
+    let locator = search.locate_unique(&primary)?;
+
+    store.set_stats_target(&locator, entity, columns, target)?;
+
+    if !no_analyze {
+        analyze_loc(store, &locator, entity)?;
+    }
+    Ok(())
 }

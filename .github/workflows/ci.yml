@@ -26,6 +26,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: graph_node_test
+          POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -41,7 +42,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install lld
-        run: sudo apt-get install -y lld
+        run: sudo apt-get install -y lld protobuf-compiler
 
       - name: Run unit tests
         uses: actions-rs/cargo@v1
@@ -63,6 +64,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: graph_node_test
+          POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -78,7 +80,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install lld
-        run: sudo apt-get install -y lld
+        run: sudo apt-get install -y lld protobuf-compiler
 
       - name: Run runner tests
         id: runner-tests-1
@@ -108,7 +110,7 @@ jobs:
           cache-dependency-path: "tests/integration-tests/yarn.lock"
 
       - name: Install lld and jq
-        run: sudo apt-get install -y lld jq
+        run: sudo apt-get install -y lld jq protobuf-compiler
 
       - name: Build graph-node
         uses: actions-rs/cargo@v1
@@ -185,7 +187,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get -y install libpq-dev
+          sudo apt-get -y install libpq-dev protobuf-compiler
       - name: Cargo check (release)
         uses: actions-rs/cargo@v1
         with:

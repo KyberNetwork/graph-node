@@ -40,11 +40,12 @@ use graph::prelude::{
 use graph_graphql::prelude::api_schema;
 use web3::types::Address;
 
-use crate::block_range::block_number;
+use crate::block_range::{block_number, BLOCK_COLUMN, BLOCK_RANGE_COLUMN};
 use crate::catalog;
 use crate::deployment;
 use crate::detail::ErrorDetail;
 use crate::dynds::DataSourcesTable;
+use crate::relational::index::{CreateIndex, Method};
 use crate::relational::{Layout, LayoutCache, SqlName, Table};
 use crate::relational_queries::FromEntityData;
 use crate::{connection_pool::ConnectionPool, detail};
@@ -134,7 +135,7 @@ impl DeploymentStore {
         let mut replica_order: Vec<_> = pool_weights
             .iter()
             .enumerate()
-            .map(|(i, weight)| {
+            .flat_map(|(i, weight)| {
                 let replica = if i == 0 {
                     ReplicaId::Main
                 } else {
@@ -142,7 +143,6 @@ impl DeploymentStore {
                 };
                 vec![replica; *weight]
             })
-            .flatten()
             .collect();
         let mut rng = thread_rng();
         replica_order.shuffle(&mut rng);
@@ -175,6 +175,8 @@ impl DeploymentStore {
             let exists = deployment::exists(&conn, &site)?;
 
             // Create (or update) the metadata. Update only happens in tests
+            let entities_with_causality_region =
+                deployment.manifest.entities_with_causality_region.clone();
             if replace || !exists {
                 deployment::create_deployment(&conn, &site, deployment, exists, replace)?;
             };
@@ -184,7 +186,12 @@ impl DeploymentStore {
                 let query = format!("create schema {}", &site.namespace);
                 conn.batch_execute(&query)?;
 
-                let layout = Layout::create_relational_schema(&conn, site.clone(), schema)?;
+                let layout = Layout::create_relational_schema(
+                    &conn,
+                    site.clone(),
+                    schema,
+                    entities_with_causality_region.into_iter().collect(),
+                )?;
                 // See if we are grafting and check that the graft is permissible
                 if let Some(base) = graft_base {
                     let errors = layout.can_copy_from(&base);
@@ -238,17 +245,11 @@ impl DeploymentStore {
     ) -> Result<(Vec<T>, Trace), QueryExecutionError> {
         let layout = self.layout(conn, site)?;
 
-        let logger = query.logger.unwrap_or_else(|| self.logger.clone());
-        layout.query(
-            &logger,
-            conn,
-            query.collection,
-            query.filter,
-            query.order,
-            query.range,
-            query.block,
-            query.query_id,
-        )
+        let logger = query
+            .logger
+            .cheap_clone()
+            .unwrap_or_else(|| self.logger.cheap_clone());
+        layout.query(&logger, conn, query)
     }
 
     fn check_interface_entity_uniqueness(
@@ -280,8 +281,7 @@ impl DeploymentStore {
                 .interfaces_for_type(&key.entity_type)
                 .into_iter()
                 .flatten()
-                .map(|interface| &types_for_interface[&interface.into()])
-                .flatten()
+                .flat_map(|interface| &types_for_interface[&EntityType::from(interface)])
                 .map(EntityType::from)
                 .filter(|type_name| type_name != &key.entity_type),
         );
@@ -315,7 +315,7 @@ impl DeploymentStore {
         let mut inserts = HashMap::new();
         let mut overwrites = HashMap::new();
         let mut removals = HashMap::new();
-        for modification in mods.into_iter() {
+        for modification in mods.iter() {
             match modification {
                 Insert { key, data } => {
                     inserts
@@ -383,14 +383,7 @@ impl DeploymentStore {
         section.end();
 
         let _section = stopwatch.start_section("apply_entity_modifications_insert");
-        layout.insert(
-            &self.logger,
-            conn,
-            entity_type,
-            data,
-            block_number(ptr),
-            stopwatch,
-        )
+        layout.insert(conn, entity_type, data, block_number(ptr), stopwatch)
     }
 
     fn overwrite_entities<'a>(
@@ -410,14 +403,7 @@ impl DeploymentStore {
         section.end();
 
         let _section = stopwatch.start_section("apply_entity_modifications_update");
-        layout.update(
-            &self.logger,
-            conn,
-            entity_type,
-            data,
-            block_number(ptr),
-            stopwatch,
-        )
+        layout.update(conn, entity_type, data, block_number(ptr), stopwatch)
     }
 
     fn remove_entities(
@@ -699,9 +685,54 @@ impl DeploymentStore {
     }
 
     /// Runs the SQL `ANALYZE` command in a table.
-    pub(crate) fn analyze(&self, site: Arc<Site>, entity_name: &str) -> Result<(), StoreError> {
+    pub(crate) fn analyze(&self, site: Arc<Site>, entity: Option<&str>) -> Result<(), StoreError> {
         let conn = self.get_conn()?;
-        self.analyze_with_conn(site, entity_name, &conn)
+        let layout = self.layout(&conn, site)?;
+        let tables = entity
+            .map(|entity| resolve_table_name(&layout, &entity))
+            .transpose()?
+            .map(|table| vec![table])
+            .unwrap_or_else(|| layout.tables.values().map(Arc::as_ref).collect());
+        for table in tables {
+            table.analyze(&conn)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn stats_targets(
+        &self,
+        site: Arc<Site>,
+    ) -> Result<(i32, BTreeMap<SqlName, BTreeMap<SqlName, i32>>), StoreError> {
+        let conn = self.get_conn()?;
+        let default = catalog::default_stats_target(&conn)?;
+        let targets = catalog::stats_targets(&conn, &site.namespace)?;
+
+        Ok((default, targets))
+    }
+
+    pub(crate) fn set_stats_target(
+        &self,
+        site: Arc<Site>,
+        entity: Option<&str>,
+        columns: Vec<String>,
+        target: i32,
+    ) -> Result<(), StoreError> {
+        let conn = self.get_conn()?;
+        let layout = self.layout(&conn, site.clone())?;
+
+        let tables = entity
+            .map(|entity| resolve_table_name(&layout, &entity))
+            .transpose()?
+            .map(|table| vec![table])
+            .unwrap_or_else(|| layout.tables.values().map(Arc::as_ref).collect());
+
+        conn.transaction(|| {
+            for table in tables {
+                let columns = resolve_column_names(table, &columns)?;
+                catalog::set_stats_target(&conn, &site.namespace, &table.name, &columns, target)?;
+            }
+            Ok(())
+        })
     }
 
     /// Runs the SQL `ANALYZE` command in a table, with a shared connection.
@@ -713,7 +744,7 @@ impl DeploymentStore {
     ) -> Result<(), StoreError> {
         let store = self.clone();
         let entity_name = entity_name.to_owned();
-        let layout = store.layout(&conn, site)?;
+        let layout = store.layout(conn, site)?;
         let table = resolve_table_name(&layout, &entity_name)?;
         table.analyze(conn)
     }
@@ -726,7 +757,7 @@ impl DeploymentStore {
         site: Arc<Site>,
         entity_name: &str,
         field_names: Vec<String>,
-        index_method: String,
+        index_method: Method,
     ) -> Result<(), StoreError> {
         let store = self.clone();
         let entity_name = entity_name.to_owned();
@@ -768,7 +799,7 @@ impl DeploymentStore {
         &self,
         site: Arc<Site>,
         entity_name: &str,
-    ) -> Result<Vec<String>, StoreError> {
+    ) -> Result<Vec<CreateIndex>, StoreError> {
         let store = self.clone();
         let entity_name = entity_name.to_owned();
         self.with_conn(move |conn, _| {
@@ -776,8 +807,13 @@ impl DeploymentStore {
             let layout = store.layout(conn, site)?;
             let table = resolve_table_name(&layout, &entity_name)?;
             let table_name = &table.name;
-            catalog::indexes_for_table(conn, schema_name.as_str(), table_name.as_str())
-                .map_err(Into::into)
+            let indexes =
+                catalog::indexes_for_table(conn, schema_name.as_str(), table_name.as_str())
+                    .map_err(StoreError::from)?;
+            Ok(indexes
+                .into_iter()
+                .map(|defn| CreateIndex::parse(defn))
+                .collect())
         })
         .await
     }
@@ -824,7 +860,7 @@ impl DeploymentStore {
         self.with_conn(move |conn, cancel| {
             let layout = store.layout(conn, site.clone())?;
             cancel.check_cancel()?;
-            let state = deployment::state(&conn, site.deployment.clone())?;
+            let state = deployment::state(conn, site.deployment.clone())?;
 
             if state.latest_block.number <= reorg_threshold {
                 return Ok(reporter);
@@ -877,7 +913,7 @@ impl DeploymentStore {
         self.with_conn(|conn, cancel| {
             cancel.check_cancel()?;
 
-            Self::block_ptr_with_conn(&conn, site).map_err(Into::into)
+            Self::block_ptr_with_conn(conn, site).map_err(Into::into)
         })
         .await
     }
@@ -888,7 +924,7 @@ impl DeploymentStore {
         self.with_conn(|conn, cancel| {
             cancel.check_cancel()?;
 
-            deployment::get_subgraph_firehose_cursor(&conn, site)
+            deployment::get_subgraph_firehose_cursor(conn, site)
                 .map(FirehoseCursor::from)
                 .map_err(Into::into)
         })
@@ -995,12 +1031,8 @@ impl DeploymentStore {
 
         let info = self.subgraph_info(&site5).map_err(anyhow::Error::from)?;
 
-        let mut finisher = ProofOfIndexingFinisher::new(
-            &block2,
-            &site3.deployment,
-            &indexer,
-            info.poi_version.clone(),
-        );
+        let mut finisher =
+            ProofOfIndexingFinisher::new(&block2, &site3.deployment, &indexer, info.poi_version);
         for (name, region) in by_causality_region.drain() {
             finisher.add_causality_region(&name, &region);
         }
@@ -1018,17 +1050,17 @@ impl DeploymentStore {
     ) -> Result<Option<Entity>, StoreError> {
         let conn = self.get_conn()?;
         let layout = self.layout(&conn, site)?;
-        layout.find(&conn, &key.entity_type, &key.entity_id, block)
+        layout.find(&conn, &key, block)
     }
 
-    /// Retrieve all the entities matching `ids_for_type` from the
-    /// deployment `site`. Only consider entities as of the given `block`
+    /// Retrieve all the entities matching `ids_for_type`, both the type and causality region, from
+    /// the deployment `site`. Only consider entities as of the given `block`
     pub(crate) fn get_many(
         &self,
         site: Arc<Site>,
-        ids_for_type: &BTreeMap<&EntityType, Vec<&str>>,
+        ids_for_type: &BTreeMap<(EntityType, CausalityRegion), Vec<String>>,
         block: BlockNumber,
-    ) -> Result<BTreeMap<EntityType, Vec<Entity>>, StoreError> {
+    ) -> Result<BTreeMap<EntityKey, Entity>, StoreError> {
         if ids_for_type.is_empty() {
             return Ok(BTreeMap::new());
         }
@@ -1180,7 +1212,7 @@ impl DeploymentStore {
                 // importantly creation of dynamic data sources. We ensure in the
                 // rest of the code that we only record history for those meta data
                 // changes that might need to be reverted
-                Layout::revert_metadata(&conn, &site, block)?;
+                Layout::revert_metadata(conn, &site, block)?;
 
                 deployment::update_entity_count(
                     conn,
@@ -1251,7 +1283,7 @@ impl DeploymentStore {
         error: SubgraphError,
     ) -> Result<(), StoreError> {
         self.with_conn(move |conn, _| {
-            conn.transaction(|| deployment::fail(&conn, &id, &error))
+            conn.transaction(|| deployment::fail(conn, &id, &error))
                 .map_err(Into::into)
         })
         .await?;
@@ -1287,7 +1319,7 @@ impl DeploymentStore {
         manifest_idx_and_name: Vec<(u32, String)>,
     ) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
         self.with_conn(move |conn, _| {
-            conn.transaction(|| crate::dynds::load(&conn, &site, block, manifest_idx_and_name))
+            conn.transaction(|| crate::dynds::load(conn, &site, block, manifest_idx_and_name))
                 .map_err(Into::into)
         })
         .await
@@ -1627,7 +1659,7 @@ impl DeploymentStore {
         &self,
         site: &Site,
     ) -> Result<deployment::SubgraphHealth, StoreError> {
-        let id = site.id.clone();
+        let id = site.id;
         self.with_conn(move |conn, _| deployment::health(conn, id).map_err(Into::into))
             .await
     }
@@ -1638,7 +1670,7 @@ impl DeploymentStore {
         raw_yaml: String,
     ) -> Result<(), StoreError> {
         self.with_conn(move |conn, _| {
-            deployment::set_manifest_raw_yaml(&conn, &site, &raw_yaml).map_err(Into::into)
+            deployment::set_manifest_raw_yaml(conn, &site, &raw_yaml).map_err(Into::into)
         })
         .await
     }
@@ -1660,26 +1692,34 @@ fn resolve_table_name<'a>(layout: &'a Layout, name: &'_ str) -> Result<&'a Table
         })
 }
 
-// Resolves column names.
-//
-// Since we allow our input to be either camel-case or snake-case, we must retry the
-// search using the latter if the search for the former fails.
+/// Resolves column names against the `table`. The `field_names` can be
+/// either GraphQL attributes or the SQL names of columns. We also accept
+/// the names `block_range` and `block$` and map that to the correct name
+/// for the block range column for that table.
 fn resolve_column_names<'a, T: AsRef<str>>(
     table: &'a Table,
     field_names: &[T],
-) -> Result<Vec<&'a str>, StoreError> {
+) -> Result<Vec<&'a SqlName>, StoreError> {
+    fn lookup<'a>(table: &'a Table, field: &str) -> Result<&'a SqlName, StoreError> {
+        table
+            .column_for_field(field)
+            .or_else(|_error| {
+                let sql_name = SqlName::from(field);
+                table
+                    .column(&sql_name)
+                    .ok_or_else(|| StoreError::UnknownField(field.to_string()))
+            })
+            .map(|column| &column.name)
+    }
+
     field_names
         .iter()
         .map(|f| {
-            table
-                .column_for_field(f.as_ref())
-                .or_else(|_error| {
-                    let sql_name = SqlName::from(f.as_ref());
-                    table
-                        .column(&sql_name)
-                        .ok_or_else(|| StoreError::UnknownField(f.as_ref().to_string()))
-                })
-                .map(|column| column.name.as_str())
+            if f.as_ref() == BLOCK_RANGE_COLUMN || f.as_ref() == BLOCK_COLUMN {
+                Ok(table.block_column())
+            } else {
+                lookup(table, f.as_ref())
+            }
         })
         .collect()
 }

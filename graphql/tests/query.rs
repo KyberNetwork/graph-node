@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate pretty_assertions;
 
-use graph::components::store::{EntityKey, EntityType};
+use graph::components::store::EntityKey;
 use graph::data::subgraph::schema::DeploymentCreate;
 use graph::entity;
 use graph::prelude::SubscriptionResult;
@@ -34,9 +34,9 @@ use graph::{
 };
 use graph_graphql::{prelude::*, subscription::execute_subscription};
 use test_store::{
-    deployment_state, execute_subgraph_query_with_deadline, graphql_metrics, revert_block,
-    run_test_sequentially, transact_errors, Store, BLOCK_ONE, GENESIS_PTR, LOAD_MANAGER, LOGGER,
-    METRICS_REGISTRY, STORE, SUBSCRIPTION_MANAGER,
+    deployment_state, execute_subgraph_query, execute_subgraph_query_with_deadline,
+    graphql_metrics, revert_block, run_test_sequentially, transact_errors, Store, BLOCK_ONE,
+    GENESIS_PTR, LOAD_MANAGER, LOGGER, METRICS_REGISTRY, STORE, SUBSCRIPTION_MANAGER,
 };
 
 const NETWORK_NAME: &str = "fake_network";
@@ -170,6 +170,7 @@ fn test_schema(id: DeploymentHash, id_type: IdType) -> Schema {
 
     type Song @entity {
         id: @ID@!
+        sid: String!
         title: String!
         writtenBy: Musician!
         publisher: Publisher!
@@ -289,10 +290,10 @@ async fn insert_test_entities(
         entity! { __typename: "Publisher", id: "0xb1" },
         entity! { __typename: "Band", id: "b1", name: "The Musicians", originalSongs: vec![s[1], s[2]] },
         entity! { __typename: "Band", id: "b2", name: "The Amateurs",  originalSongs: vec![s[1], s[3], s[4]] },
-        entity! { __typename: "Song", id: s[1], title: "Cheesy Tune",  publisher: "0xb1", writtenBy: "m1", media: vec![md[1], md[2]] },
-        entity! { __typename: "Song", id: s[2], title: "Rock Tune",    publisher: "0xb1", writtenBy: "m2", media: vec![md[3], md[4]] },
-        entity! { __typename: "Song", id: s[3], title: "Pop Tune",     publisher: "0xb1", writtenBy: "m1", media: vec![md[5]] },
-        entity! { __typename: "Song", id: s[4], title: "Folk Tune",    publisher: "0xb1", writtenBy: "m3", media: vec![md[6]] },
+        entity! { __typename: "Song", id: s[1], sid: "s1", title: "Cheesy Tune",  publisher: "0xb1", writtenBy: "m1", media: vec![md[1], md[2]] },
+        entity! { __typename: "Song", id: s[2], sid: "s2", title: "Rock Tune",    publisher: "0xb1", writtenBy: "m2", media: vec![md[3], md[4]] },
+        entity! { __typename: "Song", id: s[3], sid: "s3", title: "Pop Tune",     publisher: "0xb1", writtenBy: "m1", media: vec![md[5]] },
+        entity! { __typename: "Song", id: s[4], sid: "s4", title: "Folk Tune",    publisher: "0xb1", writtenBy: "m3", media: vec![md[6]] },
         entity! { __typename: "SongStat", id: s[1], played: 10 },
         entity! { __typename: "SongStat", id: s[2], played: 15 },
         entity! { __typename: "BandReview", id: "r1", body: "Bad musicians", band: "b1", author: "u1" },
@@ -319,12 +320,10 @@ async fn insert_test_entities(
 
     async fn insert_at(entities: Vec<Entity>, deployment: &DeploymentLocator, block_ptr: BlockPtr) {
         let insert_ops = entities.into_iter().map(|data| EntityOperation::Set {
-            key: EntityKey {
-                entity_type: EntityType::new(
-                    data.get("__typename").unwrap().clone().as_string().unwrap(),
-                ),
-                entity_id: data.get("id").unwrap().clone().as_string().unwrap().into(),
-            },
+            key: EntityKey::data(
+                data.get("__typename").unwrap().clone().as_string().unwrap(),
+                data.get("id").unwrap().clone().as_string().unwrap(),
+            ),
             data,
         });
 
@@ -363,7 +362,7 @@ async fn execute_query_document_with_variables(
         METRICS_REGISTRY.clone(),
     ));
     let target = QueryTarget::Deployment(id.clone(), Default::default());
-    let query = Query::new(query, variables);
+    let query = Query::new(query, variables, false);
 
     runner
         .run_query_with_complexity(query, target, None, None, None, None)
@@ -397,6 +396,16 @@ impl From<&str> for QueryArgs {
     fn from(query: &str) -> Self {
         QueryArgs {
             query: query.to_owned(),
+            variables: None,
+            max_complexity: None,
+        }
+    }
+}
+
+impl From<String> for QueryArgs {
+    fn from(query: String) -> Self {
+        QueryArgs {
+            query,
             variables: None,
             max_complexity: None,
         }
@@ -464,7 +473,7 @@ where
                     METRICS_REGISTRY.clone(),
                 ));
                 let target = QueryTarget::Deployment(id.clone(), Default::default());
-                let query = Query::new(query, variables);
+                let query = Query::new(query, variables, false);
 
                 runner
                     .run_query_with_complexity(query, target, max_complexity, None, None, None)
@@ -497,6 +506,7 @@ async fn run_subscription(
     let query = Query::new(
         graphql_parser::parse_query(query).unwrap().into_static(),
         None,
+        false,
     );
     let options = SubscriptionExecutionOptions {
         logger: logger.clone(),
@@ -1254,6 +1264,7 @@ fn instant_timeout() {
                 .unwrap()
                 .into_static(),
             None,
+            false,
         );
 
         match first_result(
@@ -2175,7 +2186,7 @@ fn can_query_with_and_filter() {
           name
           id
         }
-      }      
+      }
     ";
 
     run_query(QUERY, |result, _| {
@@ -2260,4 +2271,57 @@ fn can_query_with_or_implicit_and_filter() {
         let data = extract_data!(result).unwrap();
         assert_eq!(data, exp);
     })
+}
+
+#[test]
+fn trace_works() {
+    run_test_sequentially(|store| async move {
+        let deployment = setup_readonly(store.as_ref()).await;
+        let query = Query::new(
+            graphql_parser::parse_query("query { musicians(first: 100) { name } }")
+                .unwrap()
+                .into_static(),
+            None,
+            true,
+        );
+
+        let result = execute_subgraph_query(
+            query,
+            QueryTarget::Deployment(deployment.hash.into(), Default::default()),
+        )
+        .await;
+
+        let trace = &result.first().unwrap().trace;
+        assert!(!trace.is_none(), "result has a trace");
+    })
+}
+
+/// Check that various comparisons against `id` work as expected. This also
+/// serves as a test that they work for `String` as well as `Bytes` fields
+/// in general
+#[test]
+fn can_compare_id() {
+    // For each entry `(cond, sids)` in this array, check that a query with
+    // a where clause `cond` returns a list of songs whose `sid` are the
+    // ones listed in `sids`
+    let checks = [
+        ("id_gt:  @S2@", vec!["s3", "s4"]),
+        ("id_gte: @S2@", vec!["s2", "s3", "s4"]),
+        ("id_lt:  @S2@", vec!["s1"]),
+        ("id_lte: @S2@", vec!["s1", "s2"]),
+        ("id_not: @S2@", vec!["s1", "s3", "s4"]),
+    ];
+
+    for (cond, sids) in checks {
+        let query = format!("query {{ songs(where: {{ {cond} }}) {{ sid }} }}");
+        let sids: Vec<_> = sids
+            .iter()
+            .map(|sid| object! { sid: sid.to_string() })
+            .collect();
+        let exp = object! { songs: sids };
+        run_query(query, move |result, id_type| {
+            let data = extract_data!(result).unwrap();
+            assert_eq!(data, exp, "check {} for {:?} ids", cond, id_type);
+        })
+    }
 }

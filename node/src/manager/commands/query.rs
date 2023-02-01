@@ -58,9 +58,14 @@ pub async fn run(
     let query = Query::new(
         document,
         Some(QueryVariables::new(HashMap::from_iter(vars))),
+        true,
     );
 
     let res = runner.run_query(query, target).await;
+    if let Some(err) = res.errors().first().cloned() {
+        return Err(err.into());
+    }
+
     if let Some(output) = output {
         let mut f = File::create(output)?;
         let json = serde_json::to_string(&res)?;

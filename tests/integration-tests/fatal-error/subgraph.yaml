@@ -17,7 +17,6 @@ dataSources:
           file: ./abis/Contract.abi
       entities:
         - Call
-      eventHandlers:
-        - event: Trigger(uint16)
-          handler: handleTrigger
+      blockHandlers:
+        - handler: handleBlock
       file: ./src/mapping.ts

@@ -1495,6 +1495,18 @@ impl<'a> Connection<'a> {
             .map_err(|e| anyhow!("error looking up ens_name for hash {}: {}", hash, e).into())
     }
 
+    pub fn is_ens_table_empty(&self) -> Result<bool, StoreError> {
+        use ens_names as dsl;
+
+        dsl::table
+            .select(dsl::name)
+            .limit(1)
+            .get_result::<String>(self.conn.as_ref())
+            .optional()
+            .map(|r| r.is_none())
+            .map_err(|e| anyhow!("error if ens table is empty: {}", e).into())
+    }
+
     pub fn record_active_copy(&self, src: &Site, dst: &Site) -> Result<(), StoreError> {
         use active_copies as cp;
 
@@ -1517,6 +1529,17 @@ impl<'a> Connection<'a> {
 
         Ok(())
     }
+}
+
+/// Return `true` if we deem this installation to be empty, defined as
+/// having no deployments and no subgraph names in the database
+pub fn is_empty(conn: &PgConnection) -> Result<bool, StoreError> {
+    use deployment_schemas as ds;
+    use subgraph as s;
+
+    let empty = ds::table.count().get_result::<i64>(conn)? == 0
+        && s::table.count().get_result::<i64>(conn)? == 0;
+    Ok(empty)
 }
 
 /// A struct that reads from pools in order, trying each pool in turn until

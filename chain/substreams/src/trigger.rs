@@ -2,13 +2,13 @@ use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use anyhow::Error;
 use graph::{
-    blockchain::{self, block_stream::BlockWithTriggers, BlockPtr},
+    blockchain::{self, block_stream::BlockWithTriggers, BlockPtr, EmptyNodeCapabilities},
     components::{
-        store::{DeploymentLocator, EntityKey, SubgraphFork},
+        store::{DeploymentLocator, EntityKey, EntityType, SubgraphFork},
         subgraph::{MappingError, ProofOfIndexingEvent, SharedProofOfIndexing},
     },
     data::store::scalar::Bytes,
-    data_source,
+    data_source::{self, CausalityRegion},
     prelude::{
         anyhow, async_trait, BigDecimal, BigInt, BlockHash, BlockNumber, BlockState, Entity,
         RuntimeHostBuilder, Value,
@@ -20,9 +20,7 @@ use graph_runtime_wasm::module::ToAscPtr;
 use lazy_static::__Deref;
 
 use crate::codec;
-use crate::{
-    codec::entity_change::Operation, Block, Chain, NodeCapabilities, NoopDataSourceTemplate,
-};
+use crate::{codec::entity_change::Operation, Block, Chain, NoopDataSourceTemplate};
 
 #[derive(Eq, PartialEq, PartialOrd, Ord, Debug, Clone)]
 pub struct TriggerData {}
@@ -76,7 +74,7 @@ impl blockchain::TriggerFilter<Chain> for TriggerFilter {
             return;
         }
 
-        if let Some(ref ds) = data_sources.next() {
+        if let Some(ds) = data_sources.next() {
             *data_sources_len = 1;
             *modules = ds.source.package.modules.clone();
             *module_name = ds.source.module_name.clone();
@@ -84,8 +82,8 @@ impl blockchain::TriggerFilter<Chain> for TriggerFilter {
         }
     }
 
-    fn node_capabilities(&self) -> NodeCapabilities {
-        NodeCapabilities {}
+    fn node_capabilities(&self) -> EmptyNodeCapabilities<Chain> {
+        EmptyNodeCapabilities::default()
     }
 
     fn to_firehose_filter(self) -> Vec<prost_types::Any> {
@@ -185,14 +183,18 @@ where
                 Operation::Create | Operation::Update => {
                     let entity_type: &str = &entity_change.entity;
                     let entity_id: String = entity_change.id.clone();
-                    let key = EntityKey::data(entity_type.to_string(), entity_id.clone());
+                    let key = EntityKey {
+                        entity_type: EntityType::new(entity_type.to_string()),
+                        entity_id: entity_id.clone().into(),
+                        causality_region: CausalityRegion::ONCHAIN, // Substreams don't currently support offchain data
+                    };
                     let mut data: HashMap<String, Value> = HashMap::from_iter(vec![]);
 
                     for field in entity_change.fields.iter() {
                         let new_value: &codec::value::Typed = match &field.new_value {
                             Some(codec::Value {
                                 typed: Some(new_value),
-                            }) => &new_value,
+                            }) => new_value,
                             _ => continue,
                         };
 
@@ -203,7 +205,7 @@ where
                     write_poi_event(
                         proof_of_indexing,
                         &ProofOfIndexingEvent::SetEntity {
-                            entity_type: &entity_type,
+                            entity_type,
                             id: &entity_id,
                             data: &data,
                         },
@@ -216,7 +218,11 @@ where
                 Operation::Delete => {
                     let entity_type: &str = &entity_change.entity;
                     let entity_id: String = entity_change.id.clone();
-                    let key = EntityKey::data(entity_type.to_string(), entity_id.clone());
+                    let key = EntityKey {
+                        entity_type: EntityType::new(entity_type.to_string()),
+                        entity_id: entity_id.clone().into(),
+                        causality_region: CausalityRegion::ONCHAIN, // Substreams don't currently support offchain data
+                    };
 
                     state.entity_cache.remove(key);
 
@@ -243,21 +249,29 @@ fn decode_value(value: &crate::codec::value::Typed) -> Result<Value, MappingErro
     match value {
         Typed::Int32(new_value) => Ok(Value::Int(*new_value)),
 
-        Typed::Bigdecimal(new_value) => BigDecimal::from_str(&new_value)
-            .map(|bd| Value::BigDecimal(bd))
+        Typed::Bigdecimal(new_value) => BigDecimal::from_str(new_value)
+            .map(Value::BigDecimal)
             .map_err(|err| MappingError::Unknown(anyhow::Error::from(err))),
 
-        Typed::Bigint(new_value) => BigInt::from_str(&new_value)
-            .map(|bi| Value::BigInt(bi))
+        Typed::Bigint(new_value) => BigInt::from_str(new_value)
+            .map(Value::BigInt)
             .map_err(|err| MappingError::Unknown(anyhow::Error::from(err))),
 
-        Typed::String(new_value) => Ok(Value::String(new_value.clone())),
+        Typed::String(new_value) => {
+            let mut string = new_value.clone();
+
+            // Strip null characters since they are not accepted by Postgres.
+            if string.contains('\u{0000}') {
+                string = string.replace('\u{0000}', "");
+            }
+            Ok(Value::String(string))
+        }
 
         Typed::Bytes(new_value) => base64::decode(&new_value)
             .map(|bs| Value::Bytes(Bytes::from(bs.as_ref())))
             .map_err(|err| MappingError::Unknown(anyhow::Error::from(err))),
 
-        Typed::Bool(new_value) => Ok(Value::Bool(new_value.clone())),
+        Typed::Bool(new_value) => Ok(Value::Bool(*new_value)),
 
         Typed::Array(arr) => arr
             .value

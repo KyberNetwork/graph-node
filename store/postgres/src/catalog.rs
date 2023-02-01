@@ -6,8 +6,10 @@ use diesel::{
     sql_types::{Array, Double, Nullable, Text},
     ExpressionMethods, QueryDsl,
 };
+use graph::components::store::EntityType;
 use graph::components::store::VersionStats;
-use std::collections::{HashMap, HashSet};
+use itertools::Itertools;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 use std::iter::FromIterator;
 use std::sync::Arc;
@@ -36,12 +38,61 @@ table! {
     }
 }
 
-// Readonly; we only access the name
+// Readonly;  not all columns are mapped
 table! {
-    pg_namespace(nspname) {
-        nspname -> Text,
+    pg_namespace(oid) {
+        oid -> Oid,
+        #[sql_name = "nspname"]
+        name -> Text,
     }
 }
+// Readonly; only mapping the columns we want
+table! {
+    pg_database(datname) {
+        datname -> Text,
+        datcollate -> Text,
+        datctype -> Text,
+    }
+}
+
+// Readonly; not all columns are mapped
+table! {
+    pg_class(oid) {
+        oid -> Oid,
+        #[sql_name = "relname"]
+        name -> Text,
+        #[sql_name = "relnamespace"]
+        namespace -> Oid,
+        #[sql_name = "relpages"]
+        pages -> Integer,
+        #[sql_name = "reltuples"]
+        tuples -> Integer,
+        #[sql_name = "relkind"]
+        kind -> Char,
+        #[sql_name = "relnatts"]
+        natts -> Smallint,
+    }
+}
+
+// Readonly; not all columns are mapped
+table! {
+    pg_attribute(oid) {
+        #[sql_name = "attrelid"]
+        oid -> Oid,
+        #[sql_name = "attrelid"]
+        relid -> Oid,
+        #[sql_name = "attname"]
+        name -> Text,
+        #[sql_name = "attnum"]
+        num -> Smallint,
+        #[sql_name = "attstattarget"]
+        stats_target -> Integer,
+    }
+}
+
+joinable!(pg_class -> pg_namespace(namespace));
+joinable!(pg_attribute -> pg_class(relid));
+allow_tables_to_appear_in_same_query!(pg_class, pg_namespace, pg_attribute);
 
 table! {
     subgraphs.table_stats {
@@ -65,23 +116,70 @@ lazy_static! {
         SqlName::verbatim("__diesel_schema_migrations".to_string());
 }
 
-// In debug builds (for testing etc.) create exclusion constraints, in
-// release builds for production, skip them
-#[cfg(debug_assertions)]
-const CREATE_EXCLUSION_CONSTRAINT: bool = true;
-#[cfg(not(debug_assertions))]
-const CREATE_EXCLUSION_CONSTRAINT: bool = false;
+pub struct Locale {
+    collate: String,
+    ctype: String,
+    encoding: String,
+}
+
+impl Locale {
+    /// Load locale information for current database
+    pub fn load(conn: &PgConnection) -> Result<Locale, StoreError> {
+        use diesel::dsl::sql;
+        use pg_database as db;
+
+        let (collate, ctype, encoding) = db::table
+            .filter(db::datname.eq(sql("current_database()")))
+            .select((
+                db::datcollate,
+                db::datctype,
+                sql::<Text>("pg_encoding_to_char(encoding)::text"),
+            ))
+            .get_result::<(String, String, String)>(conn)?;
+        Ok(Locale {
+            collate,
+            ctype,
+            encoding,
+        })
+    }
+
+    pub fn suitable(&self) -> Result<(), String> {
+        if self.collate != "C" {
+            return Err(format!(
+                "database collation is `{}` but must be `C`",
+                self.collate
+            ));
+        }
+        if self.ctype != "C" {
+            return Err(format!(
+                "database ctype is `{}` but must be `C`",
+                self.ctype
+            ));
+        }
+        if self.encoding != "UTF8" {
+            return Err(format!(
+                "database encoding is `{}` but must be `UTF8`",
+                self.encoding
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// Information about what tables and columns we have in the database
 #[derive(Debug, Clone)]
 pub struct Catalog {
     pub site: Arc<Site>,
     text_columns: HashMap<String, HashSet<String>>,
+
     pub use_poi: bool,
     /// Whether `bytea` columns are indexed with just a prefix (`true`) or
     /// in their entirety. This influences both DDL generation and how
     /// queries are generated
     pub use_bytea_prefix: bool,
+
+    /// Set of tables which have an explicit causality region column.
+    pub(crate) entities_with_causality_region: BTreeSet<EntityType>,
 }
 
 impl Catalog {
@@ -90,6 +188,7 @@ impl Catalog {
         conn: &PgConnection,
         site: Arc<Site>,
         use_bytea_prefix: bool,
+        entities_with_causality_region: Vec<EntityType>,
     ) -> Result<Self, StoreError> {
         let text_columns = get_text_columns(conn, &site.namespace)?;
         let use_poi = supports_proof_of_indexing(conn, &site.namespace)?;
@@ -98,11 +197,15 @@ impl Catalog {
             text_columns,
             use_poi,
             use_bytea_prefix,
+            entities_with_causality_region: entities_with_causality_region.into_iter().collect(),
         })
     }
 
     /// Return a new catalog suitable for creating a new subgraph
-    pub fn for_creation(site: Arc<Site>) -> Self {
+    pub fn for_creation(
+        site: Arc<Site>,
+        entities_with_causality_region: BTreeSet<EntityType>,
+    ) -> Self {
         Catalog {
             site,
             text_columns: HashMap::default(),
@@ -111,18 +214,23 @@ impl Catalog {
             // DDL generation creates indexes for prefixes of bytes columns
             // see: attr-bytea-prefix
             use_bytea_prefix: true,
+            entities_with_causality_region,
         }
     }
 
     /// Make a catalog as if the given `schema` did not exist in the database
     /// yet. This function should only be used in situations where a database
     /// connection is definitely not available, such as in unit tests
-    pub fn for_tests(site: Arc<Site>) -> Result<Self, StoreError> {
+    pub fn for_tests(
+        site: Arc<Site>,
+        entities_with_causality_region: BTreeSet<EntityType>,
+    ) -> Result<Self, StoreError> {
         Ok(Catalog {
             site,
             text_columns: HashMap::default(),
             use_poi: false,
             use_bytea_prefix: true,
+            entities_with_causality_region,
         })
     }
 
@@ -133,12 +241,6 @@ impl Catalog {
             .get(table.as_str())
             .map(|cols| cols.contains(column.as_str()))
             .unwrap_or(false)
-    }
-
-    /// Whether to create exclusion indexes; if false, create gist indexes
-    /// w/o an exclusion constraint
-    pub fn create_exclusion_constraint() -> bool {
-        CREATE_EXCLUSION_CONSTRAINT
     }
 }
 
@@ -189,7 +291,7 @@ pub fn table_exists(
         .bind::<Text, _>(namespace)
         .bind::<Text, _>(table.as_str())
         .load(conn)?;
-    Ok(result.len() > 0)
+    Ok(!result.is_empty())
 }
 
 pub fn supports_proof_of_indexing(
@@ -245,7 +347,7 @@ pub fn has_namespace(conn: &PgConnection, namespace: &Namespace) -> Result<bool,
     use pg_namespace as nsp;
 
     Ok(select(diesel::dsl::exists(
-        nsp::table.filter(nsp::nspname.eq(namespace.as_str())),
+        nsp::table.filter(nsp::name.eq(namespace.as_str())),
     ))
     .get_result::<bool>(conn)?)
 }
@@ -640,5 +742,63 @@ pub(crate) fn cancel_vacuum(conn: &PgConnection, namespace: &Namespace) -> Resul
     )
     .bind::<Text, _>(namespace)
     .execute(conn)?;
+    Ok(())
+}
+
+pub(crate) fn default_stats_target(conn: &PgConnection) -> Result<i32, StoreError> {
+    #[derive(Queryable, QueryableByName)]
+    struct Target {
+        #[sql_type = "Integer"]
+        setting: i32,
+    }
+
+    let target =
+        sql_query("select setting::int from pg_settings where name = 'default_statistics_target'")
+            .get_result::<Target>(conn)?;
+    Ok(target.setting)
+}
+
+pub(crate) fn stats_targets(
+    conn: &PgConnection,
+    namespace: &Namespace,
+) -> Result<BTreeMap<SqlName, BTreeMap<SqlName, i32>>, StoreError> {
+    use pg_attribute as a;
+    use pg_class as c;
+    use pg_namespace as n;
+
+    let targets = c::table
+        .inner_join(n::table)
+        .inner_join(a::table)
+        .filter(c::kind.eq("r"))
+        .filter(n::name.eq(namespace.as_str()))
+        .filter(a::num.ge(1))
+        .select((c::name, a::name, a::stats_target))
+        .load::<(String, String, i32)>(conn)?
+        .into_iter()
+        .map(|(table, column, target)| (SqlName::from(table), SqlName::from(column), target));
+
+    let map = targets.into_iter().fold(
+        BTreeMap::<SqlName, BTreeMap<SqlName, i32>>::new(),
+        |mut map, (table, column, target)| {
+            map.entry(table).or_default().insert(column, target);
+            map
+        },
+    );
+    Ok(map)
+}
+
+pub(crate) fn set_stats_target(
+    conn: &PgConnection,
+    namespace: &Namespace,
+    table: &SqlName,
+    columns: &[&SqlName],
+    target: i32,
+) -> Result<(), StoreError> {
+    let columns = columns
+        .iter()
+        .map(|column| format!("alter column {} set statistics {}", column.quoted(), target))
+        .join(", ");
+    let query = format!("alter table {}.{} {}", namespace, table.quoted(), columns);
+    conn.batch_execute(&query)?;
     Ok(())
 }

@@ -204,6 +204,9 @@ where
 
     /// Records whether this was a cache hit, used for logging.
     pub(crate) cache_status: AtomicCell<CacheStatus>,
+
+    /// Whether to include an execution trace in the result
+    pub trace: bool,
 }
 
 pub(crate) fn get_field<'a>(
@@ -236,6 +239,7 @@ where
 
             // `cache_status` is a dead value for the introspection context.
             cache_status: AtomicCell::new(CacheStatus::Miss),
+            trace: ENV_VARS.log_sql_timing(),
         }
     }
 }
@@ -505,22 +509,19 @@ async fn execute_selection_set_to_map<'a>(
         let field_type = sast::get_field(object_type, &field.name).unwrap();
 
         // Check if we have the value already.
-        let field_value = prefetched_object
-            .as_mut()
-            .map(|o| {
-                // Prefetched objects are associated to `prefetch:response_key`.
-                if let Some(val) = o.remove(&format!("prefetch:{}", response_key)) {
-                    return Some(val);
-                }
+        let field_value = prefetched_object.as_mut().and_then(|o| {
+            // Prefetched objects are associated to `prefetch:response_key`.
+            if let Some(val) = o.remove(&format!("prefetch:{}", response_key)) {
+                return Some(val);
+            }
 
-                // Scalars and scalar lists are associated to the field name.
-                // If the field has more than one response key, we have to clone.
-                match multiple_response_keys.contains(field.name.as_str()) {
-                    false => o.remove(&field.name),
-                    true => o.get(&field.name).cloned(),
-                }
-            })
-            .flatten();
+            // Scalars and scalar lists are associated to the field name.
+            // If the field has more than one response key, we have to clone.
+            match multiple_response_keys.contains(field.name.as_str()) {
+                false => o.remove(&field.name),
+                true => o.get(&field.name).cloned(),
+            }
+        });
 
         if field.name.as_str() == "__typename" && field_value.is_none() {
             results.push((response_key, r::Value::String(object_type.name.clone())));

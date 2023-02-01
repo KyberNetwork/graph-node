@@ -253,7 +253,7 @@ impl<C: Blockchain> WasmInstance<C> {
         };
 
         if let Some(deterministic_error) = deterministic_error {
-            let message = format!("{:#}", deterministic_error).replace("\n", "\t");
+            let message = format!("{:#}", deterministic_error).replace('\n', "\t");
 
             // Log the error and restore the updates snapshot, effectively reverting the handler.
             error!(&self.instance_ctx().ctx.logger,
@@ -1704,6 +1704,12 @@ impl<C: Blockchain> WasmInstanceContext<C> {
 
         let hash: String = asc_get(self, hash_ptr, gas)?;
         let name = self.ctx.host_exports.ens_name_by_hash(&*hash)?;
+        if name.is_none() && self.ctx.host_exports.is_ens_data_empty()? {
+            return Err(anyhow!(
+                "Missing ENS data: see https://github.com/graphprotocol/ens-rainbow"
+            )
+            .into());
+        }
 
         // map `None` to `null`, and `Some(s)` to a runtime string
         name.map(|name| asc_new(self, &*name, gas).map_err(Into::into))

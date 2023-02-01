@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
 
-const POSTGRES_IMAGE: &'static str = "postgres:latest";
-const IPFS_IMAGE: &'static str = "ipfs/go-ipfs:v0.10.0";
-const GANACHE_IMAGE: &'static str = "trufflesuite/ganache-cli:latest";
+const POSTGRES_IMAGE: &str = "postgres:latest";
+const IPFS_IMAGE: &str = "ipfs/go-ipfs:v0.10.0";
+const GANACHE_IMAGE: &str = "trufflesuite/ganache-cli:latest";
 type DockerError = bollard::errors::Error;
 
 pub async fn pull_images() {
@@ -82,7 +82,11 @@ impl TestContainerService {
 
         container::Config {
             image: Some(POSTGRES_IMAGE),
-            env: Some(vec!["POSTGRES_PASSWORD=password", "POSTGRES_USER=postgres"]),
+            env: Some(vec![
+                "POSTGRES_PASSWORD=password",
+                "POSTGRES_USER=postgres",
+                "POSTGRES_INITDB_ARGS=-E UTF8 --locale=C",
+            ]),
             host_config: Some(host_config),
             cmd: Some(vec![
                 "postgres",
@@ -209,7 +213,7 @@ impl DockerTestClient {
         loop {
             match stream.next().await {
                 Some(Ok(container::LogOutput::StdOut { message })) => {
-                    if contains_subslice(&message, &trigger_message) {
+                    if contains_subslice(&message, trigger_message) {
                         break;
                     } else {
                         sleep(Duration::from_millis(100)).await;
@@ -240,7 +244,7 @@ impl DockerTestClient {
 
         // 1. Create Exec
         let config = exec::CreateExecOptions {
-            cmd: Some(vec!["createdb", &database_name]),
+            cmd: Some(vec!["createdb", "-E", "UTF8", "--locale=C", &database_name]),
             user: Some("postgres"),
             attach_stdout: Some(true),
             ..Default::default()

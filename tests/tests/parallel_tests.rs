@@ -24,9 +24,8 @@ lazy_static::lazy_static! {
 }
 
 /// All integration tests subdirectories to run
-pub const INTEGRATION_TESTS_DIRECTORIES: [&str; 9] = [
+pub const INTEGRATION_TESTS_DIRECTORIES: [&str; 8] = [
     "api-version-v0-0-4",
-    "fatal-error",
     "ganache-reverts",
     "host-exports",
     "non-fatal-errors",
@@ -197,7 +196,7 @@ async fn parallel_integration_tests() -> anyhow::Result<()> {
     let mut stream = tokio_stream::iter(test_directories)
         .map(|dir| {
             run_integration_test(
-                dir.clone(),
+                dir,
                 postgres.clone(),
                 postgres_ports.clone(),
                 ipfs_ports.clone(),

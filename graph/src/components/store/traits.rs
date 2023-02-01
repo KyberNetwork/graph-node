@@ -32,6 +32,8 @@ pub trait EnsLookup: Send + Sync + 'static {
     /// Find the reverse of keccak256 for `hash` through looking it up in the
     /// rainbow table.
     fn find_name(&self, hash: &str) -> Result<Option<String>, StoreError>;
+    // Check if the rainbow table is filled.
+    fn is_table_empty(&self) -> Result<bool, StoreError>;
 }
 
 /// An entry point for all operations that require access to the node's storage
@@ -169,12 +171,11 @@ pub trait ReadStore: Send + Sync + 'static {
     /// Looks up an entity using the given store key at the latest block.
     fn get(&self, key: &EntityKey) -> Result<Option<Entity>, StoreError>;
 
-    /// Look up multiple entities as of the latest block. Returns a map of
-    /// entities by type.
+    /// Look up multiple entities as of the latest block.
     fn get_many(
         &self,
-        ids_for_type: BTreeMap<&EntityType, Vec<&str>>,
-    ) -> Result<BTreeMap<EntityType, Vec<Entity>>, StoreError>;
+        keys: BTreeSet<EntityKey>,
+    ) -> Result<BTreeMap<EntityKey, Entity>, StoreError>;
 
     fn input_schema(&self) -> Arc<Schema>;
 }
@@ -187,9 +188,9 @@ impl<T: ?Sized + ReadStore> ReadStore for Arc<T> {
 
     fn get_many(
         &self,
-        ids_for_type: BTreeMap<&EntityType, Vec<&str>>,
-    ) -> Result<BTreeMap<EntityType, Vec<Entity>>, StoreError> {
-        (**self).get_many(ids_for_type)
+        keys: BTreeSet<EntityKey>,
+    ) -> Result<BTreeMap<EntityKey, Entity>, StoreError> {
+        (**self).get_many(keys)
     }
 
     fn input_schema(&self) -> Arc<Schema> {

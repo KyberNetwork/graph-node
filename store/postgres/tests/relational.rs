@@ -7,8 +7,7 @@ use graph::entity;
 use graph::prelude::BlockNumber;
 use graph::prelude::{
     o, slog, tokio, web3::types::H256, DeploymentHash, Entity, EntityCollection, EntityFilter,
-    EntityOrder, EntityQuery, EntityRange, Logger, Schema, StopwatchMetrics, Value, ValueType,
-    BLOCK_NUMBER_MAX,
+    EntityOrder, EntityQuery, Logger, Schema, StopwatchMetrics, Value, ValueType, BLOCK_NUMBER_MAX,
 };
 use graph_mock::MockMetricsRegistry;
 use graph_store_postgres::layout_for_tests::set_account_like;
@@ -17,6 +16,7 @@ use graph_store_postgres::layout_for_tests::SqlName;
 use hex_literal::hex;
 use lazy_static::lazy_static;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::panic;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -429,7 +429,7 @@ fn create_schema(conn: &PgConnection) -> Layout {
     let query = format!("create schema {}", NAMESPACE.as_str());
     conn.batch_execute(&*query).unwrap();
 
-    Layout::create_relational_schema(&conn, Arc::new(site), &schema)
+    Layout::create_relational_schema(&conn, Arc::new(site), &schema, BTreeSet::new())
         .expect("Failed to create relational schema")
 }
 
@@ -497,19 +497,31 @@ fn find() {
 
         // Happy path: find existing entity
         let entity = layout
-            .find(conn, &*SCALAR, "one", BLOCK_NUMBER_MAX)
+            .find(
+                conn,
+                &EntityKey::data(SCALAR.as_str(), "one"),
+                BLOCK_NUMBER_MAX,
+            )
             .expect("Failed to read Scalar[one]")
             .unwrap();
         assert_entity_eq!(scrub(&*SCALAR_ENTITY), entity);
 
         // Find non-existing entity
         let entity = layout
-            .find(conn, &*SCALAR, "noone", BLOCK_NUMBER_MAX)
+            .find(
+                conn,
+                &EntityKey::data(SCALAR.as_str(), "noone"),
+                BLOCK_NUMBER_MAX,
+            )
             .expect("Failed to read Scalar[noone]");
         assert!(entity.is_none());
 
         // Find for non-existing entity type
-        let err = layout.find(conn, &*NO_ENTITY, "one", BLOCK_NUMBER_MAX);
+        let err = layout.find(
+            conn,
+            &EntityKey::data(NO_ENTITY.as_str(), "one"),
+            BLOCK_NUMBER_MAX,
+        );
         match err {
             Err(e) => assert_eq!("unknown table 'NoEntity'", e.to_string()),
             _ => {
@@ -532,7 +544,11 @@ fn insert_null_fulltext_fields() {
 
         // Find entity with null string values
         let entity = layout
-            .find(conn, &*NULLABLE_STRINGS, "one", BLOCK_NUMBER_MAX)
+            .find(
+                conn,
+                &EntityKey::data(NULLABLE_STRINGS.as_str(), "one"),
+                BLOCK_NUMBER_MAX,
+            )
             .expect("Failed to read NullableStrings[one]")
             .unwrap();
         assert_entity_eq!(scrub(&*EMPTY_NULLABLESTRINGS_ENTITY), entity);
@@ -565,7 +581,11 @@ fn update() {
             .expect("Failed to update");
 
         let actual = layout
-            .find(conn, &*SCALAR, "one", BLOCK_NUMBER_MAX)
+            .find(
+                conn,
+                &EntityKey::data(SCALAR.as_str(), "one"),
+                BLOCK_NUMBER_MAX,
+            )
             .expect("Failed to read Scalar[one]")
             .unwrap();
         assert_entity_eq!(scrub(&entity), actual);
@@ -628,9 +648,13 @@ fn update_many() {
         // check updates took effect
         let updated: Vec<Entity> = ["one", "two", "three"]
             .iter()
-            .map(|id| {
+            .map(|&id| {
                 layout
-                    .find(conn, &*SCALAR, id, BLOCK_NUMBER_MAX)
+                    .find(
+                        conn,
+                        &EntityKey::data(SCALAR.as_str(), id),
+                        BLOCK_NUMBER_MAX,
+                    )
                     .expect(&format!("Failed to read Scalar[{}]", id))
                     .unwrap()
             })
@@ -697,7 +721,11 @@ fn serialize_bigdecimal() {
                 .expect("Failed to update");
 
             let actual = layout
-                .find(conn, &*SCALAR, "one", BLOCK_NUMBER_MAX)
+                .find(
+                    conn,
+                    &EntityKey::data(SCALAR.as_str(), "one"),
+                    BLOCK_NUMBER_MAX,
+                )
                 .expect("Failed to read Scalar[one]")
                 .unwrap();
             assert_entity_eq!(entity, actual);
@@ -711,20 +739,11 @@ fn count_scalar_entities(conn: &PgConnection, layout: &Layout) -> usize {
         EntityFilter::Equal("bool".into(), false.into()),
     ]);
     let collection = EntityCollection::All(vec![(SCALAR.to_owned(), AttributeNames::All)]);
+    let mut query = EntityQuery::new(layout.site.deployment.clone(), BLOCK_NUMBER_MAX, collection)
+        .filter(filter);
+    query.range.first = None;
     layout
-        .query::<Entity>(
-            &*LOGGER,
-            &conn,
-            collection,
-            Some(filter),
-            EntityOrder::Default,
-            EntityRange {
-                first: None,
-                skip: 0,
-            },
-            BLOCK_NUMBER_MAX,
-            None,
-        )
+        .query::<Entity>(&*LOGGER, &conn, query)
         .map(|(entities, _)| entities)
         .expect("Count query failed")
         .len()
@@ -907,7 +926,7 @@ fn revert_block() {
 
         let assert_fred = |name: &str| {
             let fred = layout
-                .find(conn, &EntityType::from("Cat"), id, BLOCK_NUMBER_MAX)
+                .find(conn, &EntityKey::data("Cat", id), BLOCK_NUMBER_MAX)
                 .unwrap()
                 .expect("there's a fred");
             assert_eq!(name, fred.get("name").unwrap().as_str().unwrap())
@@ -942,20 +961,16 @@ fn revert_block() {
         };
 
         let assert_marties = |max_block, except: Vec<BlockNumber>| {
+            let id = DeploymentHash::new("QmXW3qvxV7zXnwRntpj7yoK8HZVtaraZ67uMqaLRvXdxha").unwrap();
+            let collection =
+                EntityCollection::All(vec![(EntityType::from("Mink"), AttributeNames::All)]);
+            let filter = EntityFilter::StartsWith("id".to_string(), Value::from("marty"));
+            let query = EntityQuery::new(id, BLOCK_NUMBER_MAX, collection)
+                .filter(filter)
+                .first(100)
+                .order(EntityOrder::Ascending("order".to_string(), ValueType::Int));
             let marties: Vec<Entity> = layout
-                .query(
-                    &*LOGGER,
-                    conn,
-                    EntityCollection::All(vec![(EntityType::from("Mink"), AttributeNames::All)]),
-                    Some(EntityFilter::StartsWith(
-                        "id".to_string(),
-                        Value::from("marty"),
-                    )),
-                    EntityOrder::Ascending("order".to_string(), ValueType::Int),
-                    EntityRange::first(100),
-                    BLOCK_NUMBER_MAX,
-                    None,
-                )
+                .query(&*LOGGER, conn, query)
                 .map(|(entities, _)| entities)
                 .expect("loading all marties works");
 
@@ -1023,21 +1038,13 @@ impl<'a> QueryChecker<'a> {
         Self { conn, layout }
     }
 
-    fn check(self, expected_entity_ids: Vec<&'static str>, query: EntityQuery) -> Self {
+    fn check(self, expected_entity_ids: Vec<&'static str>, mut query: EntityQuery) -> Self {
         let q = query.clone();
         let unordered = matches!(query.order, EntityOrder::Unordered);
+        query.block = BLOCK_NUMBER_MAX;
         let entities = self
             .layout
-            .query::<Entity>(
-                &*LOGGER,
-                self.conn,
-                query.collection,
-                query.filter,
-                query.order,
-                query.range,
-                BLOCK_NUMBER_MAX,
-                None,
-            )
+            .query::<Entity>(&*LOGGER, self.conn, query)
             .expect("layout.query failed to execute query")
             .0;
 
@@ -1686,16 +1693,7 @@ impl<'a> FilterChecker<'a> {
 
         let entities = self
             .layout
-            .query::<Entity>(
-                &*LOGGER,
-                &self.conn,
-                query.collection,
-                query.filter,
-                query.order,
-                query.range,
-                BLOCK_NUMBER_MAX,
-                None,
-            )
+            .query::<Entity>(&*LOGGER, &self.conn, query)
             .expect("layout.query failed to execute query")
             .0;
 

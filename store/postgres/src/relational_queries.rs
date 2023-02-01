@@ -14,6 +14,7 @@ use diesel::Connection;
 
 use graph::components::store::EntityKey;
 use graph::data::value::Word;
+use graph::data_source::CausalityRegion;
 use graph::prelude::{
     anyhow, r, serde_json, Attribute, BlockNumber, ChildMultiplicity, Entity, EntityCollection,
     EntityFilter, EntityLink, EntityOrder, EntityRange, EntityWindow, ParentLink,
@@ -39,13 +40,16 @@ use crate::sql_value::SqlValue;
 use crate::{
     block_range::{
         BlockRangeColumn, BlockRangeLowerBoundClause, BlockRangeUpperBoundClause, BLOCK_COLUMN,
-        BLOCK_RANGE_COLUMN, BLOCK_RANGE_CURRENT,
+        BLOCK_RANGE_COLUMN, BLOCK_RANGE_CURRENT, CAUSALITY_REGION_COLUMN,
     },
     primary::{Namespace, Site},
 };
 
 /// Those are columns that we always want to fetch from the database.
 const BASE_SQL_COLUMNS: [&'static str; 2] = ["id", "vid"];
+
+/// The maximum number of bind variables that can be used in a query
+const POSTGRES_MAX_PARAMETERS: usize = u16::MAX as usize; // 65535
 
 #[derive(Debug)]
 pub(crate) struct UnsupportedFilter {
@@ -445,6 +449,8 @@ pub struct EntityDeletion {
     entity: String,
     #[sql_type = "Text"]
     id: String,
+    #[sql_type = "Integer"]
+    causality_region: CausalityRegion,
 }
 
 impl EntityDeletion {
@@ -454,6 +460,10 @@ impl EntityDeletion {
 
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub fn causality_region(&self) -> CausalityRegion {
+        self.causality_region
     }
 }
 
@@ -599,10 +609,8 @@ impl<'a> QueryFragment<Pg> for QueryValue<'a> {
                                     out.push_sql(") || ");
                                 }
                                 out.push_sql("to_tsvector(");
-                                out.push_bind_param::<Text, _>(
-                                    &config.language.as_str().to_string(),
-                                )?;
-                                out.push_sql("::regconfig, ");
+                                out.push_sql(config.language.as_sql());
+                                out.push_sql(", ");
                                 out.push_bind_param::<Text, _>(&value)?;
                             }
                             out.push_sql("))");
@@ -1442,16 +1450,24 @@ impl<'a> QueryFragment<Pg> for QueryFilter<'a> {
     }
 }
 
+/// A query that finds an entity by key. Used during indexing.
+/// See also `FindManyQuery`.
 #[derive(Debug, Clone, Constructor)]
 pub struct FindQuery<'a> {
     table: &'a Table,
-    id: &'a str,
+    key: &'a EntityKey,
     block: BlockNumber,
 }
 
 impl<'a> QueryFragment<Pg> for FindQuery<'a> {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
         out.unsafe_to_cache_prepared();
+
+        let EntityKey {
+            entity_type: _,
+            entity_id,
+            causality_region,
+        } = self.key;
 
         // Generate
         //    select '..' as entity, to_jsonb(e.*) as data
@@ -1462,8 +1478,13 @@ impl<'a> QueryFragment<Pg> for FindQuery<'a> {
         out.push_sql("  from ");
         out.push_sql(self.table.qualified_name.as_str());
         out.push_sql(" e\n where ");
-        self.table.primary_key().eq(self.id, &mut out)?;
+        self.table.primary_key().eq(entity_id, &mut out)?;
         out.push_sql(" and ");
+        if self.table.has_causality_region {
+            out.push_sql("causality_region = ");
+            out.push_bind_param::<Integer, _>(causality_region)?;
+            out.push_sql(" and ");
+        }
         BlockRangeColumn::new(self.table, "e.", self.block).contains(&mut out)
     }
 }
@@ -1552,7 +1573,13 @@ impl<'a> QueryFragment<Pg> for FindPossibleDeletionsQuery<'a> {
             }
             out.push_sql("select ");
             out.push_bind_param::<Text, _>(&table.object.as_str())?;
-            out.push_sql(" as entity, e.id\n");
+            out.push_sql(" as entity, ");
+            if table.has_causality_region {
+                out.push_sql("causality_region, ");
+            } else {
+                out.push_sql("0 as causality_region, ");
+            }
+            out.push_sql("e.id\n");
             out.push_sql("  from ");
             out.push_sql(table.qualified_name.as_str());
             out.push_sql(" e\n where ");
@@ -1580,10 +1607,10 @@ impl<'a, Conn> RunQueryDsl<Conn> for FindPossibleDeletionsQuery<'a> {}
 #[derive(Debug, Clone, Constructor)]
 pub struct FindManyQuery<'a> {
     pub(crate) _namespace: &'a Namespace,
-    pub(crate) tables: Vec<&'a Table>,
+    pub(crate) tables: Vec<(&'a Table, CausalityRegion)>,
 
     // Maps object name to ids.
-    pub(crate) ids_for_type: &'a BTreeMap<&'a EntityType, Vec<&'a str>>,
+    pub(crate) ids_for_type: &'a BTreeMap<(EntityType, CausalityRegion), Vec<String>>,
     pub(crate) block: BlockNumber,
 }
 
@@ -1599,7 +1626,7 @@ impl<'a> QueryFragment<Pg> for FindManyQuery<'a> {
         //      from schema.<table1> e where {id.is_in($ids1))
         //    union all
         //    ...
-        for (i, table) in self.tables.iter().enumerate() {
+        for (i, (table, cr)) in self.tables.iter().enumerate() {
             if i > 0 {
                 out.push_sql("\nunion all\n");
             }
@@ -1611,8 +1638,13 @@ impl<'a> QueryFragment<Pg> for FindManyQuery<'a> {
             out.push_sql(" e\n where ");
             table
                 .primary_key()
-                .is_in(&self.ids_for_type[&table.object], &mut out)?;
+                .is_in(&self.ids_for_type[&(table.object.clone(), *cr)], &mut out)?;
             out.push_sql(" and ");
+            if table.has_causality_region {
+                out.push_sql("causality_region = ");
+                out.push_bind_param::<Integer, _>(cr)?;
+                out.push_sql(" and ");
+            }
             BlockRangeColumn::new(table, "e.", self.block).contains(&mut out)?;
         }
         Ok(())
@@ -1697,6 +1729,28 @@ impl<'a> InsertQuery<'a> {
         }
         hashmap.into_iter().map(|(_key, value)| value).collect()
     }
+
+    /// Return the maximum number of entities that can be inserted with one
+    /// invocation of `InsertQuery`. The number makes it so that we do not
+    /// exceed the maximum number of bind variables that can be used in a
+    /// query, and depends on what columns `table` has and how they get put
+    /// into the query
+    pub fn chunk_size(table: &Table) -> usize {
+        let mut count = 1;
+        for column in table.columns.iter() {
+            // This code depends closely on how `walk_ast` and `QueryValue`
+            // put values into bind variables
+            if let Some(fields) = &column.fulltext_fields {
+                // Fulltext fields use one bind variable for each field that
+                // gets put into the index
+                count += fields.len()
+            } else {
+                // All other values use one bind variable
+                count += 1
+            }
+        }
+        POSTGRES_MAX_PARAMETERS / count
+    }
 }
 
 impl<'a> QueryFragment<Pg> for InsertQuery<'a> {
@@ -1722,12 +1776,16 @@ impl<'a> QueryFragment<Pg> for InsertQuery<'a> {
             out.push_sql(", ");
         }
         self.br_column.name(&mut out);
+        if self.table.has_causality_region {
+            out.push_sql(", ");
+            out.push_sql(CAUSALITY_REGION_COLUMN);
+        };
 
         out.push_sql(") values\n");
 
         // Use a `Peekable` iterator to help us decide how to finalize each line.
-        let mut iter = self.entities.iter().map(|(_key, entity)| entity).peekable();
-        while let Some(entity) = iter.next() {
+        let mut iter = self.entities.iter().peekable();
+        while let Some((key, entity)) = iter.next() {
             out.push_sql("(");
             for column in &self.unique_columns {
                 // If the column name is not within this entity's fields, we will issue the
@@ -1740,6 +1798,10 @@ impl<'a> QueryFragment<Pg> for InsertQuery<'a> {
                 out.push_sql(", ");
             }
             self.br_column.literal_range_current(&mut out)?;
+            if self.table.has_causality_region {
+                out.push_sql(", ");
+                out.push_bind_param::<Integer, _>(&key.causality_region)?;
+            };
             out.push_sql(")");
 
             // finalize line according to remaining entities to insert
@@ -3465,6 +3527,12 @@ impl<'a> QueryFragment<Pg> for CopyEntityBatchQuery<'a> {
         } else {
             out.push_sql(BLOCK_RANGE_COLUMN);
         }
+
+        if self.dst.has_causality_region {
+            out.push_sql(", ");
+            out.push_sql(CAUSALITY_REGION_COLUMN);
+        };
+
         out.push_sql(")\nselect ");
         for column in &self.columns {
             out.push_identifier(column.name.as_str())?;
@@ -3510,6 +3578,24 @@ impl<'a> QueryFragment<Pg> for CopyEntityBatchQuery<'a> {
                 out.push_sql(&checked_conversion);
             }
             (false, false) => out.push_sql(BLOCK_RANGE_COLUMN),
+        }
+
+        match (self.src.has_causality_region, self.dst.has_causality_region) {
+            (false, false) => (),
+            (true, true) => {
+                out.push_sql(", ");
+                out.push_sql(CAUSALITY_REGION_COLUMN);
+            }
+            (false, true) => {
+                out.push_sql(", 0");
+            }
+            (true, false) => {
+                return Err(constraint_violation!(
+                    "can not copy entity type {} to {} because the src has a causality region but the dst does not",
+                    self.src.object.as_str(),
+                    self.dst.object.as_str()
+                ));
+            }
         }
         out.push_sql(" from ");
         out.push_sql(self.src.qualified_name.as_str());

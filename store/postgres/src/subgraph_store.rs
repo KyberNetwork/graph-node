@@ -5,8 +5,8 @@ use diesel::{
     types::{FromSql, ToSql},
 };
 use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
+    collections::{BTreeMap, HashMap},
+    sync::{atomic::AtomicU8, Arc, Mutex},
 };
 use std::{fmt, io::Write};
 use std::{iter::FromIterator, time::Duration};
@@ -35,13 +35,12 @@ use graph::{
     util::timed_cache::TimedCache,
 };
 
-use crate::fork;
 use crate::{
     connection_pool::ConnectionPool,
     deployment::SubgraphHealth,
     primary,
     primary::{DeploymentId, Mirror as PrimaryMirror, Site},
-    relational::Layout,
+    relational::{index::Method, Layout},
     writable::WritableStore,
     NotificationSender,
 };
@@ -50,6 +49,7 @@ use crate::{
     detail::DeploymentDetail,
     primary::UnusedDeployment,
 };
+use crate::{fork, relational::index::CreateIndex, relational::SqlName};
 
 /// The name of a database shard; valid names must match `[a-z0-9_]+`
 #[derive(Clone, Debug, Eq, PartialEq, Hash, AsExpression, FromSqlRow)]
@@ -1030,10 +1030,36 @@ impl SubgraphStoreInner {
     pub fn analyze(
         &self,
         deployment: &DeploymentLocator,
-        entity_name: &str,
+        entity_name: Option<&str>,
     ) -> Result<(), StoreError> {
         let (store, site) = self.store(&deployment.hash)?;
         store.analyze(site, entity_name)
+    }
+
+    /// Return the statistics targets for all tables of `deployment`. The
+    /// first return value is the default target, and the second value maps
+    /// the name of each table to a map of column name to its statistics
+    /// target. A value of `-1` means that the global default will be used.
+    pub fn stats_targets(
+        &self,
+        deployment: &DeploymentLocator,
+    ) -> Result<(i32, BTreeMap<SqlName, BTreeMap<SqlName, i32>>), StoreError> {
+        let (store, site) = self.store(&deployment.hash)?;
+        store.stats_targets(site)
+    }
+
+    /// Set the statistics target for columns `columns` in `deployment`. If
+    /// `entity` is `Some`, only set it for the table for that entity, if it
+    /// is `None`, set it for all tables in the deployment.
+    pub fn set_stats_target(
+        &self,
+        deployment: &DeploymentLocator,
+        entity: Option<&str>,
+        columns: Vec<String>,
+        target: i32,
+    ) -> Result<(), StoreError> {
+        let (store, site) = self.store(&deployment.hash)?;
+        store.set_stats_target(site, entity, columns, target)
     }
 
     pub async fn create_manual_index(
@@ -1041,7 +1067,7 @@ impl SubgraphStoreInner {
         deployment: &DeploymentLocator,
         entity_name: &str,
         field_names: Vec<String>,
-        index_method: String,
+        index_method: Method,
     ) -> Result<(), StoreError> {
         let (store, site) = self.store(&deployment.hash)?;
         store
@@ -1053,7 +1079,7 @@ impl SubgraphStoreInner {
         &self,
         deployment: &DeploymentLocator,
         entity_name: &str,
-    ) -> Result<Vec<String>, StoreError> {
+    ) -> Result<Vec<CreateIndex>, StoreError> {
         let (store, site) = self.store(&deployment.hash)?;
         store.indexes_for_entity(site, entity_name).await
     }
@@ -1121,8 +1147,35 @@ impl SubgraphStoreInner {
     }
 }
 
+const STATE_ENS_NOT_CHECKED: u8 = 0;
+const STATE_ENS_EMPTY: u8 = 1;
+const STATE_ENS_NOT_EMPTY: u8 = 2;
+
+/// EnsLookup reads from a rainbow table store in postgres that needs to be manually
+/// loaded. To avoid unnecessary database roundtrips, the empty table check is lazy
+/// and will not be retried. Once the table is checked, any subsequent calls will
+/// just used the stored result.
 struct EnsLookup {
     primary: ConnectionPool,
+    // In order to keep the struct lock free, we'll use u8 for the status:
+    // 0 - Not Checked
+    // 1 - Checked - empty
+    // 2 - Checked - non empty
+    state: AtomicU8,
+}
+
+impl EnsLookup {
+    pub fn new(pool: ConnectionPool) -> Self {
+        Self {
+            primary: pool,
+            state: AtomicU8::new(STATE_ENS_NOT_CHECKED),
+        }
+    }
+
+    fn is_table_empty(pool: &ConnectionPool) -> Result<bool, StoreError> {
+        let conn = pool.get()?;
+        primary::Connection::new(conn).is_ens_table_empty()
+    }
 }
 
 impl EnsLookupTrait for EnsLookup {
@@ -1130,14 +1183,31 @@ impl EnsLookupTrait for EnsLookup {
         let conn = self.primary.get()?;
         primary::Connection::new(conn).find_ens_name(hash)
     }
+
+    fn is_table_empty(&self) -> Result<bool, StoreError> {
+        match self.state.load(std::sync::atomic::Ordering::SeqCst) {
+            STATE_ENS_NOT_CHECKED => {}
+            STATE_ENS_EMPTY => return Ok(true),
+            STATE_ENS_NOT_EMPTY => return Ok(false),
+            _ => unreachable!("unsupported state"),
+        }
+
+        let is_empty = Self::is_table_empty(&self.primary)?;
+        let new_state = match is_empty {
+            true => STATE_ENS_EMPTY,
+            false => STATE_ENS_NOT_EMPTY,
+        };
+        self.state
+            .store(new_state, std::sync::atomic::Ordering::SeqCst);
+
+        Ok(is_empty)
+    }
 }
 
 #[async_trait::async_trait]
 impl SubgraphStoreTrait for SubgraphStore {
     fn ens_lookup(&self) -> Arc<dyn EnsLookupTrait> {
-        Arc::new(EnsLookup {
-            primary: self.mirror.primary().clone(),
-        })
+        Arc::new(EnsLookup::new(self.mirror.primary().clone()))
     }
 
     // FIXME: This method should not get a node_id

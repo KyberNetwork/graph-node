@@ -75,9 +75,11 @@ pub mod prelude {
     pub use futures03::sink::SinkExt as _;
     pub use futures03::stream::{StreamExt as _, TryStreamExt};
     pub use hex;
+    pub use isatty;
     pub use lazy_static::lazy_static;
     pub use prost;
     pub use rand;
+    pub use regex;
     pub use reqwest;
     pub use serde;
     pub use serde_derive::{Deserialize, Serialize};
@@ -115,7 +117,6 @@ pub mod prelude {
         PrometheusError, Registry,
     };
     pub use crate::components::server::index_node::IndexNodeServer;
-    pub use crate::components::server::metrics::MetricsServer;
     pub use crate::components::server::query::GraphQLServer;
     pub use crate::components::server::subscription::SubscriptionServer;
     pub use crate::components::store::{

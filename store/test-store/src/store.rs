@@ -3,6 +3,7 @@ use graph::data::graphql::effort::LoadManager;
 use graph::data::query::QueryResults;
 use graph::data::query::QueryTarget;
 use graph::data::subgraph::schema::{DeploymentCreate, SubgraphError};
+use graph::data_source::CausalityRegion;
 use graph::log;
 use graph::prelude::{QueryStoreManager as _, SubgraphStore as _, *};
 use graph::semver::Version;
@@ -122,7 +123,7 @@ where
 /// Run a test with a connection into the primary database, not a full store
 pub fn run_test_with_conn<F>(test: F)
 where
-    F: FnOnce(&PgConnection) -> (),
+    F: FnOnce(&PgConnection),
 {
     // Lock regardless of poisoning. This also forces sequential test execution.
     let _lock = match SEQ_LOCK.lock() {
@@ -226,7 +227,7 @@ pub async fn transact_errors(
     );
     store
         .subgraph_store()
-        .writable(LOGGER.clone(), deployment.id.clone())
+        .writable(LOGGER.clone(), deployment.id)
         .await?
         .transact_block_operations(
             block_ptr_to,
@@ -353,8 +354,9 @@ pub async fn insert_entities(
         .into_iter()
         .map(|(entity_type, data)| EntityOperation::Set {
             key: EntityKey {
-                entity_type: entity_type.to_owned(),
+                entity_type,
                 entity_id: data.get("id").unwrap().clone().as_string().unwrap().into(),
+                causality_region: CausalityRegion::ONCHAIN,
             },
             data,
         });
@@ -446,6 +448,7 @@ async fn execute_subgraph_query_internal(
     )
     .unwrap();
     let network = Some(status[0].chains[0].network.clone());
+    let trace = query.trace;
     let query = return_err!(PreparedQuery::new(
         &logger,
         schema,
@@ -459,10 +462,7 @@ async fn execute_subgraph_query_internal(
     let deployment = query.schema.id().clone();
     let store = STORE
         .clone()
-        .query_store(
-            QueryTarget::Deployment(deployment.into(), version.clone()),
-            false,
-        )
+        .query_store(QueryTarget::Deployment(deployment, version.clone()), false)
         .await
         .unwrap();
     let state = store.deployment_state().await.unwrap();
@@ -492,6 +492,7 @@ async fn execute_subgraph_query_internal(
                     load_manager: LOAD_MANAGER.clone(),
                     max_first: std::u32::MAX,
                     max_skip: std::u32::MAX,
+                    trace,
                 },
             )
             .await,
@@ -545,7 +546,7 @@ fn build_store() -> (Arc<Store>, ConnectionPool, Config, Arc<SubscriptionManager
     opt.store_connection_pool_size = CONN_POOL_SIZE;
 
     let config = Config::load(&*LOGGER, &opt)
-        .expect(&format!("config is not valid (file={:?})", &opt.config));
+        .unwrap_or_else(|_| panic!("config is not valid (file={:?})", &opt.config));
     let registry = Arc::new(MockMetricsRegistry::new());
     std::thread::spawn(move || {
         STORE_RUNTIME.handle().block_on(async {

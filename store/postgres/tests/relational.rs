@@ -195,7 +195,7 @@ lazy_static! {
     static ref NULLABLE_STRINGS: EntityType = EntityType::from("NullableStrings");
     static ref DEPLOYMENT: DeploymentLocator = DeploymentLocator::new(
         DeploymentId::new(1),
-        DeploymentHash::new("other-things").unwrap(),
+        DeploymentHash::new("otherthings").unwrap(),
         None
     );
     static ref MOCK_STOPWATCH: StopwatchMetrics = StopwatchMetrics::new(

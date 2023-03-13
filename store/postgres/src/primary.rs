@@ -696,12 +696,16 @@ mod queries {
 
         let row = row.unwrap();
         let names_and_versions = subgraphs_by_deployment_hash(conn, &row.subgraph)?;
-        let subgraph_name = &names_and_versions[0].0;
 
-        diesel::update(ds::table)
-            .set(ds::subgraph_name.eq(subgraph_name))
-            .execute(conn)
-            .map(|_| Ok(()))?
+        if names_and_versions.len() > 0 {
+            let subgraph_name = &names_and_versions[0].0;
+            return diesel::update(ds::table)
+                .set(ds::subgraph_name.eq(subgraph_name))
+                .execute(conn)
+                .map(|_| Ok(()))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -763,22 +767,22 @@ impl<'a> Connection<'a> {
 
         let removed: Vec<_> = ds::table
             .filter(ds::id.eq_any(removed))
-            .select((ds::id, ds::subgraph))
-            .load::<(DeploymentId, String)>(self.conn.as_ref())?
+            .select((ds::id, ds::subgraph, ds::subgraph_name))
+            .load::<(DeploymentId, String, Option<String>)>(self.conn.as_ref())?
             .into_iter()
             .collect();
 
         // Stop ongoing copies
-        let removed_ids: Vec<_> = removed.iter().map(|(id, _)| *id).collect();
+        let removed_ids: Vec<_> = removed.iter().map(|(id, _, _)| *id).collect();
         self.cancel_copies(removed_ids)?;
 
         let events = removed
             .into_iter()
-            .map(|(id, hash)| {
+            .map(|(id, hash, subgraph_name)| {
                 DeploymentHash::new(hash)
                     .map(|hash| {
                         EntityChange::for_assignment(
-                            DeploymentLocator::new(id.into(), hash, None),
+                            DeploymentLocator::new(id.into(), hash, subgraph_name),
                             EntityChangeOperation::Removed,
                         )
                     })

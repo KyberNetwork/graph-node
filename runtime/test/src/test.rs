@@ -83,7 +83,7 @@ async fn test_valid_module_and_store_with_timeout(
     .await;
     let stopwatch_metrics = StopwatchMetrics::new(
         logger.clone(),
-        deployment.readable_name(),
+        &deployment,
         "test",
         metrics_registry.clone(),
     );

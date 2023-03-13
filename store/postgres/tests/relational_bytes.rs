@@ -19,7 +19,7 @@ use graph::prelude::{
     Value, WindowAttribute, BLOCK_NUMBER_MAX,
 };
 use graph::{
-    components::store::EntityType,
+    components::store::{DeploymentId, DeploymentLocator, EntityType},
     data::store::scalar::{BigDecimal, BigInt},
 };
 use graph_store_postgres::{
@@ -74,9 +74,14 @@ lazy_static! {
     };
     static ref NAMESPACE: Namespace = Namespace::new("sgd0815".to_string()).unwrap();
     static ref THING: EntityType = EntityType::from("Thing");
+    static ref DEPLOYMENT: DeploymentLocator = DeploymentLocator::new(
+        DeploymentId::new(1),
+        DeploymentHash::new("other-things").unwrap(),
+        None
+    );
     static ref MOCK_STOPWATCH: StopwatchMetrics = StopwatchMetrics::new(
         Logger::root(slog::Discard, o!()),
-        THINGS_SUBGRAPH_ID.clone().to_string(),
+        &DEPLOYMENT,
         "test",
         Arc::new(MockMetricsRegistry::new()),
     );

@@ -1563,7 +1563,7 @@ fn handle_large_string_with_index() {
         let metrics_registry = Arc::new(MockMetricsRegistry::new());
         let stopwatch_metrics = StopwatchMetrics::new(
             Logger::root(slog::Discard, o!()),
-            deployment.readable_name(),
+            &deployment,
             "test",
             metrics_registry.clone(),
         );
@@ -1662,7 +1662,7 @@ fn handle_large_bytea_with_index() {
         let metrics_registry = Arc::new(MockMetricsRegistry::new());
         let stopwatch_metrics = StopwatchMetrics::new(
             Logger::root(slog::Discard, o!()),
-            deployment.readable_name(),
+            &deployment,
             "test",
             metrics_registry.clone(),
         );

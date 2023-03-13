@@ -17,7 +17,7 @@ use graph::slog::info;
 use graph::util::bounded_queue::BoundedQueue;
 use graph::{
     cheap_clone::CheapClone,
-    components::store::{self, EntityType, WritableStore as WritableStoreTrait},
+    components::store::{self, DeploymentLocator, EntityType, WritableStore as WritableStoreTrait},
     data::subgraph::schema::SubgraphError,
     prelude::{
         BlockPtr, DeploymentHash, EntityModification, Error, Logger, StopwatchMetrics, StoreError,
@@ -628,12 +628,13 @@ impl Queue {
         // Use a separate instance of the `StopwatchMetrics` for background
         // work since that has its own call hierarchy, and using the
         // foreground metrics will lead to incorrect nesting of sections
-        let name = match store.site.subgraph_name.clone() {
-            Some(name) => format!("{} ({})", store.site.deployment.to_string(), name),
-            None => store.site.deployment.to_string(),
-        };
+        let deployment = DeploymentLocator::new(
+            store.site.id.into(),
+            store.site.deployment.clone(),
+            store.site.subgraph_name.clone(),
+        );
 
-        let stopwatch = StopwatchMetrics::new(logger.clone(), name, "writer", registry);
+        let stopwatch = StopwatchMetrics::new(logger.clone(), &deployment, "writer", registry);
 
         let queue = Self {
             store,

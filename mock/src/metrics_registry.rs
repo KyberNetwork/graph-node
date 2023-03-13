@@ -1,4 +1,5 @@
 use graph::components::metrics::{Collector, Counter, Gauge, Opts, PrometheusError};
+use graph::components::store::DeploymentLocator;
 use graph::prelude::MetricsRegistry as MetricsRegistryTrait;
 use graph::prometheus::{CounterVec, GaugeVec, HistogramOpts, HistogramVec};
 
@@ -55,10 +56,12 @@ impl MetricsRegistryTrait for MockMetricsRegistry {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
         variable_labels: &[&str],
     ) -> Result<CounterVec, PrometheusError> {
-        let opts = Opts::new(name, help).const_label("deployment", subgraph);
+        let opts = Opts::new(name, help)
+            .const_label("deployment", deployment.hash.to_string())
+            .const_label("name", deployment.name.clone().unwrap_or_default());
         let counters = CounterVec::new(opts, variable_labels)?;
         Ok(counters)
     }

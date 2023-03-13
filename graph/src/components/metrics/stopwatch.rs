@@ -1,3 +1,4 @@
+use crate::components::store::DeploymentLocator;
 use crate::prelude::*;
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Mutex};
 use std::time::Instant;
@@ -43,7 +44,7 @@ impl CheapClone for StopwatchMetrics {}
 impl StopwatchMetrics {
     pub fn new(
         logger: Logger,
-        subgraph_name: String,
+        deployment: &DeploymentLocator,
         stage: &str,
         registry: Arc<dyn MetricsRegistry>,
     ) -> Self {
@@ -53,13 +54,13 @@ impl StopwatchMetrics {
                 .global_deployment_counter_vec(
                     "deployment_sync_secs",
                     "total time spent syncing",
-                    subgraph_name.as_str(),
+                    &deployment,
                     &["section", "stage"],
                 )
                 .unwrap_or_else(|_| {
                     panic!(
                         "failed to register subgraph_sync_total_secs prometheus counter for {}",
-                        subgraph_name
+                        &deployment.readable_name()
                     )
                 }),
             logger,

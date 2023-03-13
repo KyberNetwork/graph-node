@@ -24,7 +24,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use graph::{
-    components::store::{AttributeNames, EntityType},
+    components::store::{AttributeNames, DeploymentId, DeploymentLocator, EntityType},
     data::store::scalar::{BigDecimal, BigInt, Bytes},
 };
 use graph_store_postgres::{
@@ -193,9 +193,14 @@ lazy_static! {
     static ref SCALAR: EntityType = EntityType::from("Scalar");
     static ref NO_ENTITY: EntityType = EntityType::from("NoEntity");
     static ref NULLABLE_STRINGS: EntityType = EntityType::from("NullableStrings");
+    static ref DEPLOYMENT: DeploymentLocator = DeploymentLocator::new(
+        DeploymentId::new(1),
+        DeploymentHash::new("other-things").unwrap(),
+        None
+    );
     static ref MOCK_STOPWATCH: StopwatchMetrics = StopwatchMetrics::new(
         Logger::root(slog::Discard, o!()),
-        THINGS_SUBGRAPH_ID.clone().to_string(),
+        &DEPLOYMENT,
         "test",
         Arc::new(MockMetricsRegistry::new()),
     );

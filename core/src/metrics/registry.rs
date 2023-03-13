@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use graph::components::metrics::{counter_with_labels, gauge_with_labels};
+use graph::components::store::DeploymentLocator;
 use graph::prelude::{MetricsRegistry as MetricsRegistryTrait, *};
 
 #[derive(Clone)]
@@ -87,13 +88,15 @@ impl MetricsRegistry {
         &self,
         name: &str,
         help: &str,
-        deployment: Option<&str>,
+        deployment: Option<&DeploymentLocator>,
         variable_labels: &[&str],
     ) -> Result<CounterVec, PrometheusError> {
         let opts = Opts::new(name, help);
         let opts = match deployment {
             None => opts,
-            Some(deployment) => opts.const_label("deployment", deployment),
+            Some(deployment) => opts
+                .const_label("deployment", deployment.hash.to_string())
+                .const_label("name", deployment.name.clone().unwrap_or_default()),
         };
         let counters = CounterVec::new(opts, variable_labels)?;
         let id = counters.desc().first().unwrap().id;
@@ -194,10 +197,10 @@ impl MetricsRegistryTrait for MetricsRegistry {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
         variable_labels: &[&str],
     ) -> Result<CounterVec, PrometheusError> {
-        self.global_counter_vec_internal(name, help, Some(subgraph), variable_labels)
+        self.global_counter_vec_internal(name, help, Some(deployment), variable_labels)
     }
 
     fn global_gauge(

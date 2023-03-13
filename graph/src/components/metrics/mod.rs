@@ -4,7 +4,7 @@ pub use prometheus::{
     HistogramOpts, HistogramVec, Opts, Registry,
 };
 pub mod subgraph;
-
+use super::store::DeploymentLocator;
 use std::collections::HashMap;
 
 /// Metrics for measuring where time is spent during indexing.
@@ -69,7 +69,7 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
         variable_labels: &[&str],
     ) -> Result<CounterVec, PrometheusError>;
 
@@ -222,11 +222,12 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
         buckets: Vec<f64>,
     ) -> Result<Box<Histogram>, PrometheusError> {
         let opts = HistogramOpts::new(name, help)
-            .const_labels(deployment_labels(subgraph))
+            .const_labels(deployment_labels(&deployment.hash))
+            .const_label("name", deployment.name.clone().unwrap_or_default())
             .buckets(buckets);
         let histogram = Box::new(Histogram::with_opts(opts)?);
         self.register(name, histogram.clone());

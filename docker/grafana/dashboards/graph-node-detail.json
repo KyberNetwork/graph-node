@@ -688,11 +688,7 @@
   "templating": {
     "list": [
       {
-        "current": {
-          "selected": false,
-          "text": "QmUGTBpna7c9dwMeWwSfazu2bVV9UDGZSbdHxha3CCuzk4",
-          "value": "QmUGTBpna7c9dwMeWwSfazu2bVV9UDGZSbdHxha3CCuzk4"
-        },
+        "current": {},
         "datasource": {
           "type": "prometheus",
           "uid": "PBFA97CFB590B2093"
@@ -706,6 +702,29 @@
         "options": [],
         "query": {
           "query": "label_values(deployment)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "PBFA97CFB590B2093"
+        },
+        "definition": "label_values({deployment=\"$deployment\"}, name)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "subgraph",
+        "multi": false,
+        "name": "subgraph",
+        "options": [],
+        "query": {
+          "query": "label_values({deployment=\"$deployment\"}, name)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,

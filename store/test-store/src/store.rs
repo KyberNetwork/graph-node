@@ -221,7 +221,7 @@ pub async fn transact_errors(
     let metrics_registry = Arc::new(MockMetricsRegistry::new());
     let stopwatch_metrics = StopwatchMetrics::new(
         Logger::root(slog::Discard, o!()),
-        deployment.readable_name(),
+        deployment,
         "transact",
         metrics_registry.clone(),
     );
@@ -299,7 +299,7 @@ pub async fn transact_entities_and_dynamic_data_sources(
     let metrics_registry = Arc::new(MockMetricsRegistry::new());
     let stopwatch_metrics = StopwatchMetrics::new(
         Logger::root(slog::Discard, o!()),
-        deployment.readable_name(),
+        &deployment,
         "transact",
         metrics_registry.clone(),
     );

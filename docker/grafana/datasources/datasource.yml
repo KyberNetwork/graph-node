@@ -10,4 +10,3 @@ datasources:
       httpMethod: GET
       manageAlerts: true
       prometheusType: Prometheus
-      prometheusVersion: ">2.4.0"

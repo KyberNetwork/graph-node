@@ -89,7 +89,7 @@ async fn test_valid_module_and_store_with_timeout(
     );
     let host_metrics = Arc::new(HostMetrics::new(
         metrics_registry,
-        deployment_id.as_str(),
+        &deployment,
         stopwatch_metrics,
     ));
 

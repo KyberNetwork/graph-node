@@ -60,7 +60,7 @@ impl StopwatchMetrics {
                 .unwrap_or_else(|_| {
                     panic!(
                         "failed to register subgraph_sync_total_secs prometheus counter for {}",
-                        &deployment.readable_name()
+                        &deployment.hash.to_string()
                     )
                 }),
             logger,

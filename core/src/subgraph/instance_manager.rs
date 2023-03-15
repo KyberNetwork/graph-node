@@ -348,7 +348,7 @@ impl<S: SubgraphStore> SubgraphInstanceManager<S> {
 
         let host_metrics = Arc::new(HostMetrics::new(
             registry.cheap_clone(),
-            &deployment.readable_name(),
+            &deployment,
             stopwatch_metrics.clone(),
         ));
 
@@ -369,7 +369,7 @@ impl<S: SubgraphStore> SubgraphInstanceManager<S> {
         let mut offchain_monitor = OffchainMonitor::new(
             logger.cheap_clone(),
             registry.cheap_clone(),
-            &manifest.id,
+            &deployment,
             self.ipfs_service.clone(),
         );
 

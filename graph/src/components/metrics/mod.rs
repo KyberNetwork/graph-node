@@ -13,8 +13,11 @@ pub mod stopwatch;
 /// Aggregates over individual values.
 pub mod aggregate;
 
-fn deployment_labels(subgraph: &str) -> HashMap<String, String> {
-    labels! { String::from("deployment") => String::from(subgraph), }
+fn deployment_labels(deployment: &DeploymentLocator) -> HashMap<String, String> {
+    labels! {
+        String::from("deployment") => deployment.hash.to_string(),
+        String::from("name") => deployment.name.clone().unwrap_or_default(),
+    }
 }
 
 /// Create an unregistered counter with labels
@@ -60,9 +63,9 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
     ) -> Result<Counter, PrometheusError> {
-        self.global_counter(name, help, deployment_labels(subgraph))
+        self.global_counter(name, help, deployment_labels(deployment))
     }
 
     fn global_deployment_counter_vec(
@@ -103,9 +106,9 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
     ) -> Result<Gauge, PrometheusError> {
-        let opts = Opts::new(name, help).const_labels(deployment_labels(subgraph));
+        let opts = Opts::new(name, help).const_labels(deployment_labels(deployment));
         let gauge = Gauge::with_opts(opts)?;
         self.register(name, Box::new(gauge.clone()));
         Ok(gauge)
@@ -134,10 +137,10 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
         variable_labels: Vec<String>,
     ) -> Result<Box<GaugeVec>, PrometheusError> {
-        let opts = Opts::new(name, help).const_labels(deployment_labels(subgraph));
+        let opts = Opts::new(name, help).const_labels(deployment_labels(deployment));
         let gauges = Box::new(GaugeVec::new(
             opts,
             variable_labels
@@ -172,9 +175,9 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
     ) -> Result<Counter, PrometheusError> {
-        let counter = counter_with_labels(name, help, deployment_labels(subgraph))?;
+        let counter = counter_with_labels(name, help, deployment_labels(deployment))?;
         self.register(name, Box::new(counter.clone()));
         Ok(counter)
     }
@@ -202,10 +205,10 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
         variable_labels: Vec<String>,
     ) -> Result<Box<CounterVec>, PrometheusError> {
-        let opts = Opts::new(name, help).const_labels(deployment_labels(subgraph));
+        let opts = Opts::new(name, help).const_labels(deployment_labels(deployment));
         let counters = Box::new(CounterVec::new(
             opts,
             variable_labels
@@ -226,8 +229,7 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         buckets: Vec<f64>,
     ) -> Result<Box<Histogram>, PrometheusError> {
         let opts = HistogramOpts::new(name, help)
-            .const_labels(deployment_labels(&deployment.hash))
-            .const_label("name", deployment.name.clone().unwrap_or_default())
+            .const_labels(deployment_labels(deployment))
             .buckets(buckets);
         let histogram = Box::new(Histogram::with_opts(opts)?);
         self.register(name, histogram.clone());
@@ -273,11 +275,11 @@ pub trait MetricsRegistry: Send + Sync + 'static {
         &self,
         name: &str,
         help: &str,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
         variable_labels: Vec<String>,
         buckets: Vec<f64>,
     ) -> Result<Box<HistogramVec>, PrometheusError> {
-        let opts = Opts::new(name, help).const_labels(deployment_labels(subgraph));
+        let opts = Opts::new(name, help).const_labels(deployment_labels(deployment));
         let histograms = Box::new(HistogramVec::new(
             HistogramOpts {
                 common_opts: opts,

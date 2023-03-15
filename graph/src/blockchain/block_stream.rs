@@ -397,7 +397,7 @@ impl BlockStreamMetrics {
             .new_deployment_gauge(
                 "deployment_reverted_blocks",
                 "Track the last reverted block for a subgraph deployment",
-                deployment.hash.as_str(),
+                deployment,
             )
             .expect("Failed to create `deployment_reverted_blocks` gauge");
         let labels = labels! {

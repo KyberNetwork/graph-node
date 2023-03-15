@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::components::store::DeploymentLocator;
 use crate::prelude::*;
 
 pub struct Aggregate {
@@ -17,18 +18,25 @@ pub struct Aggregate {
 }
 
 impl Aggregate {
-    pub fn new(name: &str, subgraph: &str, help: &str, registry: Arc<dyn MetricsRegistry>) -> Self {
+    pub fn new(
+        name: &str,
+        deployment: &DeploymentLocator,
+        help: &str,
+        registry: Arc<dyn MetricsRegistry>,
+    ) -> Self {
         let make_gauge = |suffix: &str| {
             registry
                 .new_deployment_gauge(
                     &format!("{}_{}", name, suffix),
                     &format!("{} ({})", help, suffix),
-                    subgraph,
+                    deployment,
                 )
                 .unwrap_or_else(|_| {
                     panic!(
                         "failed to register metric `{}_{}` for {}",
-                        name, suffix, subgraph
+                        name,
+                        suffix,
+                        deployment.hash.to_string()
                     )
                 })
         };

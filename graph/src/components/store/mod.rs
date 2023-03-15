@@ -894,6 +894,16 @@ pub struct DeploymentLocator {
     pub name: Option<String>,
 }
 
+impl Default for DeploymentLocator {
+    fn default() -> Self {
+        Self {
+            id: DeploymentId(-1),
+            hash: DeploymentHash::new(String::default()).unwrap(),
+            name: None,
+        }
+    }
+}
+
 impl CheapClone for DeploymentLocator {}
 
 impl slog::Value for DeploymentLocator {
@@ -910,15 +920,6 @@ impl slog::Value for DeploymentLocator {
 impl DeploymentLocator {
     pub fn new(id: DeploymentId, hash: DeploymentHash, name: Option<String>) -> Self {
         Self { id, hash, name }
-    }
-
-    pub fn readable_name(&self) -> String {
-        match self.name {
-            Some(ref subgraph_name) => {
-                format!("{} ({})", self.hash.to_string(), subgraph_name)
-            }
-            None => self.hash.to_string(),
-        }
     }
 }
 

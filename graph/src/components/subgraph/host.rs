@@ -6,6 +6,7 @@ use anyhow::Error;
 use async_trait::async_trait;
 use futures::sync::mpsc;
 
+use crate::components::store::DeploymentLocator;
 use crate::components::store::SubgraphFork;
 use crate::data_source::{
     DataSource, DataSourceTemplate, MappingTrigger, TriggerData, TriggerWithHandler,
@@ -87,14 +88,14 @@ pub struct HostMetrics {
 impl HostMetrics {
     pub fn new(
         registry: Arc<dyn MetricsRegistry>,
-        subgraph: &str,
+        deployment: &DeploymentLocator,
         stopwatch: StopwatchMetrics,
     ) -> Self {
         let handler_execution_time = registry
             .new_deployment_histogram_vec(
                 "deployment_handler_execution_time",
                 "Measures the execution time for handlers",
-                subgraph,
+                deployment,
                 vec![String::from("handler")],
                 vec![0.1, 0.5, 1.0, 10.0, 100.0],
             )
@@ -103,7 +104,7 @@ impl HostMetrics {
             .new_deployment_histogram_vec(
                 "deployment_host_fn_execution_time",
                 "Measures the execution time for host functions",
-                subgraph,
+                deployment,
                 vec![String::from("host_fn_name")],
                 vec![0.025, 0.05, 0.2, 2.0, 8.0, 20.0],
             )

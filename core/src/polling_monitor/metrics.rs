@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use graph::{
-    prelude::{DeploymentHash, MetricsRegistry},
+    components::store::DeploymentLocator,
+    prelude::MetricsRegistry,
     prometheus::{Counter, Gauge},
 };
 
@@ -13,33 +14,33 @@ pub struct PollingMonitorMetrics {
 }
 
 impl PollingMonitorMetrics {
-    pub fn new(registry: Arc<dyn MetricsRegistry>, subgraph_hash: &DeploymentHash) -> Self {
+    pub fn new(registry: Arc<dyn MetricsRegistry>, deployment: &DeploymentLocator) -> Self {
         let requests = registry
             .new_deployment_counter(
                 "polling_monitor_requests",
                 "counts the total requests made to the service being polled",
-                subgraph_hash.as_str(),
+                deployment,
             )
             .unwrap();
         let not_found = registry
             .new_deployment_counter(
                 "polling_monitor_not_found",
                 "counts 'not found' responses returned from the service being polled",
-                subgraph_hash.as_str(),
+                deployment,
             )
             .unwrap();
         let errors = registry
             .new_deployment_counter(
                 "polling_monitor_errors",
                 "counts errors returned from the service being polled",
-                subgraph_hash.as_str(),
+                deployment,
             )
             .unwrap();
         let queue_depth = registry
             .new_deployment_gauge(
                 "polling_monitor_queue_depth",
                 "size of the queue of polling requests",
-                subgraph_hash.as_str(),
+                deployment,
             )
             .unwrap();
         Self {

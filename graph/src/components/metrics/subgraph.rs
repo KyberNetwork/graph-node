@@ -61,7 +61,7 @@ impl SubgraphInstanceMetrics {
             .new_deployment_counter(
                 "firehose_connection_errors",
                 "Measures connections when trying to obtain a firehose connection",
-                &deployment.hash,
+                &deployment,
             )
             .expect("failed to create firehose_connection_errors counter");
 

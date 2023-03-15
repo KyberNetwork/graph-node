@@ -110,19 +110,19 @@ impl LoggerFactory {
                             max_retries: ENV_VARS.elastic_search_max_retries,
                         },
                         term_logger.clone(),
-                        self.logs_sent_counter(Some(loc.hash.as_str())),
+                        self.logs_sent_counter(Some(loc)),
                     ),
                 )
             })
             .unwrap_or(term_logger)
     }
 
-    fn logs_sent_counter(&self, deployment: Option<&str>) -> Counter {
+    fn logs_sent_counter(&self, deployment: Option<&DeploymentLocator>) -> Counter {
         self.metrics_registry
             .global_deployment_counter(
                 "graph_elasticsearch_logs_sent",
                 "Count of logs sent to Elasticsearch endpoint",
-                deployment.unwrap_or(""),
+                &deployment.cloned().unwrap_or_default(),
             )
             .unwrap()
     }

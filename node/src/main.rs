@@ -143,8 +143,8 @@ async fn main() {
         .expect("Node ID must be between 1 and 63 characters in length");
     let query_only = config.query_only(&node_id) || opt.disable_block_ingestor;
 
-    info!(
-        logger, "NODE_FUNCTIONALITIES";
+    warn!(
+        logger, "NODE_CONFIGURATIONS";
         "node_id" => node_id.clone(),
         "query?" => !opt.disable_query_server.clone(),
         "indexing?" => !query_only.clone(),

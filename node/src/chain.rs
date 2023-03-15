@@ -1,4 +1,5 @@
 use crate::config::{Config, ProviderDetails};
+use ethereum::ENV_VARS;
 use ethereum::{EthereumNetworks, ProviderEthRpcMetrics};
 use futures::future::{join_all, try_join_all};
 use futures::TryFutureExt;
@@ -439,6 +440,7 @@ pub async fn create_ethereum_networks_for_chain(
         info!(
             logger,
             "Creating transport";
+            "final_only" => ENV_VARS.fetch_final_blocks_only,
             "url" => &web3.url,
             "capabilities" => capabilities
         );

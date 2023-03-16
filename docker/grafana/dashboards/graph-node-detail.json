@@ -173,12 +173,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "dark-red",
+                "color": "green",
                 "value": null
               },
               {
                 "color": "red",
-                "value": 80
+                "value": 1
               }
             ]
           }

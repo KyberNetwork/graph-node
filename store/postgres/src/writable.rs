@@ -182,13 +182,18 @@ impl SyncStore {
         &self,
         block_ptr_to: BlockPtr,
         firehose_cursor: &FirehoseCursor,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<(), StoreError> {
         self.retry("revert_block_operations", || {
+            let section = stopwatch.start_section("revert_store_block_operations");
             let event = self.writable.revert_block_operations(
                 self.site.clone(),
                 block_ptr_to.clone(),
                 firehose_cursor,
+                stopwatch,
             )?;
+
+            section.end();
 
             self.try_send_store_event(event)
         })
@@ -198,10 +203,15 @@ impl SyncStore {
         &self,
         current_ptr: &BlockPtr,
         parent_ptr: &BlockPtr,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<UnfailOutcome, StoreError> {
         self.retry("unfail_deterministic_error", || {
-            self.writable
-                .unfail_deterministic_error(self.site.clone(), current_ptr, parent_ptr)
+            self.writable.unfail_deterministic_error(
+                self.site.clone(),
+                current_ptr,
+                parent_ptr,
+                stopwatch,
+            )
         })
     }
 
@@ -448,6 +458,7 @@ enum Request {
         /// The subgraph head will be at this block pointer after the revert
         block_ptr: BlockPtr,
         firehose_cursor: FirehoseCursor,
+        stopwatch: StopwatchMetrics,
     },
     Stop,
 }
@@ -486,8 +497,9 @@ impl Request {
                 store,
                 block_ptr,
                 firehose_cursor,
+                stopwatch,
             } => store
-                .revert_block_operations(block_ptr.clone(), firehose_cursor)
+                .revert_block_operations(block_ptr.clone(), firehose_cursor, &stopwatch)
                 .map(|()| ExecResult::Continue),
             Request::Stop => return Ok(ExecResult::Stop),
         }
@@ -898,14 +910,18 @@ impl Writer {
         &self,
         block_ptr_to: BlockPtr,
         firehose_cursor: FirehoseCursor,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<(), StoreError> {
         match self {
-            Writer::Sync(store) => store.revert_block_operations(block_ptr_to, &firehose_cursor),
+            Writer::Sync(store) => {
+                store.revert_block_operations(block_ptr_to, &firehose_cursor, stopwatch)
+            }
             Writer::Async(queue) => {
                 let req = Request::RevertTo {
                     store: queue.store.cheap_clone(),
                     block_ptr: block_ptr_to,
                     firehose_cursor,
+                    stopwatch: stopwatch.to_owned(),
                 };
                 queue.push(req).await
             }
@@ -1051,21 +1067,25 @@ impl WritableStoreTrait for WritableStore {
         &self,
         block_ptr_to: BlockPtr,
         firehose_cursor: FirehoseCursor,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<(), StoreError> {
         *self.block_ptr.lock().unwrap() = Some(block_ptr_to.clone());
         *self.block_cursor.lock().unwrap() = firehose_cursor.clone();
 
-        self.writer.revert(block_ptr_to, firehose_cursor).await
+        self.writer
+            .revert(block_ptr_to, firehose_cursor, stopwatch)
+            .await
     }
 
     async fn unfail_deterministic_error(
         &self,
         current_ptr: &BlockPtr,
         parent_ptr: &BlockPtr,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<UnfailOutcome, StoreError> {
         let outcome = self
             .store
-            .unfail_deterministic_error(current_ptr, parent_ptr)?;
+            .unfail_deterministic_error(current_ptr, parent_ptr, stopwatch)?;
 
         if let UnfailOutcome::Unfailed = outcome {
             *self.block_ptr.lock().unwrap() = self.store.block_ptr().await?;

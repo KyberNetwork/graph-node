@@ -8,6 +8,7 @@ use graph::components::store::{DeploymentLocator, EntityKey, WritableStore};
 use graph::data::subgraph::*;
 use graph::prelude::*;
 use graph::semver::Version;
+use graph_mock::create_stopwatch;
 use graph_store_postgres::layout_for_tests::writable;
 use graph_store_postgres::{Store as DieselStore, SubgraphStore as DieselSubgraphStore};
 use web3::types::H256;
@@ -133,7 +134,7 @@ async fn resume_writer(deployment: &DeploymentLocator, steps: usize) {
 fn tracker() {
     run_test(|store, writable, deployment| async move {
         let subgraph_store = store.subgraph_store();
-
+        let watch = create_stopwatch(&deployment, LOGGER.clone());
         let read_count = || {
             let counter = writable.get(&count_key("1")).unwrap().unwrap();
             counter.get("count").unwrap().as_int().unwrap()
@@ -151,7 +152,7 @@ fn tracker() {
 
         // Test reading back with a pending revert
         writable
-            .revert_block_operations(block_pointer(2), FirehoseCursor::None)
+            .revert_block_operations(block_pointer(2), FirehoseCursor::None, &watch)
             .await
             .unwrap();
 

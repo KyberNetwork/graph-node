@@ -1173,6 +1173,7 @@ impl DeploymentStore {
         site: Arc<Site>,
         block_ptr_to: BlockPtr,
         firehose_cursor: &FirehoseCursor,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<StoreEvent, StoreError> {
         let event = deployment::with_lock(conn, &site, || {
             conn.transaction(|| -> Result<_, StoreError> {
@@ -1195,24 +1196,30 @@ impl DeploymentStore {
                 // The revert functions want the number of the first block that we need to get rid of
                 let block = block_ptr_to.number + 1;
 
+                let section = stopwatch.start_section("revert_deployment_block_ptr");
                 deployment::revert_block_ptr(
                     conn,
                     &site.deployment,
                     block_ptr_to,
                     firehose_cursor,
                 )?;
+                section.end();
 
                 // Revert the data
                 let layout = self.layout(conn, site.clone())?;
 
+                let section = stopwatch.start_section("revert_layout_block_data");
                 let (event, count) = layout.revert_block(conn, block)?;
+                section.end();
 
                 // Revert the meta data changes that correspond to this subgraph.
                 // Only certain meta data changes need to be reverted, most
                 // importantly creation of dynamic data sources. We ensure in the
                 // rest of the code that we only record history for those meta data
                 // changes that might need to be reverted
+                let section = stopwatch.start_section("revert_layout_block_metadata");
                 Layout::revert_metadata(conn, &site, block)?;
+                section.end();
 
                 deployment::update_entity_count(
                     conn,
@@ -1231,6 +1238,7 @@ impl DeploymentStore {
         &self,
         site: Arc<Site>,
         block_ptr_to: BlockPtr,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<StoreEvent, StoreError> {
         let conn = self.get_conn()?;
 
@@ -1248,7 +1256,7 @@ impl DeploymentStore {
 
         // When rewinding, we reset the firehose cursor. That way, on resume, Firehose will start
         // from the block_ptr instead (with sanity check to ensure it's resume at the exact block).
-        self.rewind_with_conn(&conn, site, block_ptr_to, &FirehoseCursor::None)
+        self.rewind_with_conn(&conn, site, block_ptr_to, &FirehoseCursor::None, stopwatch)
     }
 
     pub(crate) fn revert_block_operations(
@@ -1256,6 +1264,7 @@ impl DeploymentStore {
         site: Arc<Site>,
         block_ptr_to: BlockPtr,
         firehose_cursor: &FirehoseCursor,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<StoreEvent, StoreError> {
         let conn = self.get_conn()?;
         // Unwrap: If we are reverting then the block ptr is not `None`.
@@ -1266,7 +1275,7 @@ impl DeploymentStore {
             panic!("revert_block_operations must revert only backward, you are trying to revert forward going from subgraph block {} to new block {}", deployment_head, block_ptr_to);
         }
 
-        self.rewind_with_conn(&conn, site, block_ptr_to, firehose_cursor)
+        self.rewind_with_conn(&conn, site, block_ptr_to, firehose_cursor, stopwatch)
     }
 
     pub(crate) async fn deployment_state_from_id(
@@ -1484,6 +1493,7 @@ impl DeploymentStore {
         site: Arc<Site>,
         current_ptr: &BlockPtr,
         parent_ptr: &BlockPtr,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<UnfailOutcome, StoreError> {
         let conn = &self.get_conn()?;
         let deployment_id = &site.deployment;
@@ -1530,7 +1540,7 @@ impl DeploymentStore {
                     // We reset the firehose cursor. That way, on resume, Firehose will start from
                     // the block_ptr instead (with sanity checks to ensure it's resuming at the
                     // correct block).
-                    let _ = self.revert_block_operations(site.clone(), parent_ptr.clone(), &FirehoseCursor::None)?;
+                    let _ = self.revert_block_operations(site.clone(), parent_ptr.clone(), &FirehoseCursor::None, stopwatch)?;
 
                     // Unfail the deployment.
                     deployment::update_deployment_status(conn, deployment_id, prev_health, None)?;

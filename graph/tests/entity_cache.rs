@@ -82,6 +82,7 @@ impl WritableStore for MockStore {
         &self,
         _: BlockPtr,
         _: FirehoseCursor,
+        _: &StopwatchMetrics,
     ) -> Result<(), StoreError> {
         unimplemented!()
     }
@@ -90,6 +91,7 @@ impl WritableStore for MockStore {
         &self,
         _: &BlockPtr,
         _: &BlockPtr,
+        _: &StopwatchMetrics,
     ) -> Result<UnfailOutcome, StoreError> {
         unimplemented!()
     }

@@ -19,6 +19,7 @@ use graph::{
     prelude::{CheapClone, DeploymentHash, NodeId, SubgraphStore as _},
     semver::Version,
 };
+use graph_mock::create_stopwatch;
 use graph_store_postgres::layout_for_tests::Connection as Primary;
 use graph_store_postgres::SubgraphStore;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
@@ -620,6 +621,8 @@ fn fail_unfail_deterministic_error() {
             .await
             .unwrap();
 
+        let watch = create_stopwatch(&deployment, LOGGER.clone());
+
         // Process the first block.
         transact_and_wait(
             &store.subgraph_store(),
@@ -689,7 +692,7 @@ fn fail_unfail_deterministic_error() {
 
         // Unfail the subgraph.
         let outcome = writable
-            .unfail_deterministic_error(&BLOCKS[1], &BLOCKS[0])
+            .unfail_deterministic_error(&BLOCKS[1], &BLOCKS[0], &watch)
             .await
             .unwrap();
 
@@ -720,6 +723,7 @@ fn fail_unfail_deterministic_error_noop() {
 
     run_test_sequentially(|store| async move {
         let deployment = setup().await;
+        let watch = create_stopwatch(&deployment, LOGGER.clone());
 
         let count = || -> usize {
             let store = store.subgraph_store();
@@ -768,7 +772,7 @@ fn fail_unfail_deterministic_error_noop() {
 
         // Run unfail with no errors results in NOOP.
         let outcome = writable
-            .unfail_deterministic_error(&BLOCKS[1], &BLOCKS[0])
+            .unfail_deterministic_error(&BLOCKS[1], &BLOCKS[0], &watch)
             .await
             .unwrap();
 
@@ -800,7 +804,7 @@ fn fail_unfail_deterministic_error_noop() {
 
         // Running unfail_deterministic_error against a NON-deterministic error will do nothing.
         let outcome = writable
-            .unfail_deterministic_error(&BLOCKS[1], &BLOCKS[0])
+            .unfail_deterministic_error(&BLOCKS[1], &BLOCKS[0], &watch)
             .await
             .unwrap();
 
@@ -827,7 +831,7 @@ fn fail_unfail_deterministic_error_noop() {
         // Running unfail_deterministic_error won't do anything,
         // the hashes won't match and there's nothing to revert.
         let outcome = writable
-            .unfail_deterministic_error(&BLOCKS[1], &BLOCKS[0])
+            .unfail_deterministic_error(&BLOCKS[1], &BLOCKS[0], &watch)
             .await
             .unwrap();
 

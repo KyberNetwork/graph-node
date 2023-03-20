@@ -11,6 +11,7 @@ use graph::data::subgraph::schema::*;
 use graph::data::subgraph::*;
 use graph::prelude::*;
 use graph::semver::Version;
+use graph_mock::create_stopwatch;
 use graph_store_postgres::SubgraphStore as DieselSubgraphStore;
 
 const USER_GQL: &str = "
@@ -311,6 +312,7 @@ async fn check_graft(
     deployment: DeploymentLocator,
 ) -> Result<(), StoreError> {
     let (entities, ids) = find_entities(store.as_ref(), &deployment);
+    let watch = create_stopwatch(&deployment, LOGGER.clone());
 
     assert_eq!(vec!["3", "1", "2"], ids);
 
@@ -331,14 +333,14 @@ async fn check_graft(
 
     let writable = store.writable(LOGGER.clone(), deployment.id).await?;
     writable
-        .revert_block_operations(BLOCKS[1].clone(), FirehoseCursor::None)
+        .revert_block_operations(BLOCKS[1].clone(), FirehoseCursor::None, &watch)
         .await
         .expect("We can revert a block we just created");
     writable.flush().await.expect("we can revert to BLOCKS[1]");
 
     let err = {
         match writable
-            .revert_block_operations(BLOCKS[0].clone(), FirehoseCursor::None)
+            .revert_block_operations(BLOCKS[0].clone(), FirehoseCursor::None, &watch)
             .await
         {
             Ok(()) => writable.flush().await,

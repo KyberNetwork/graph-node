@@ -319,12 +319,19 @@ pub async fn transact_entities_and_dynamic_data_sources(
 
 /// Revert to block `ptr` and wait for the store to process the changes
 pub async fn revert_block(store: &Arc<Store>, deployment: &DeploymentLocator, ptr: &BlockPtr) {
+    let metrics_registry = Arc::new(MockMetricsRegistry::new());
+    let stopwatch_metrics = StopwatchMetrics::new(
+        Logger::root(slog::Discard, o!()),
+        deployment,
+        "transact",
+        metrics_registry.clone(),
+    );
     store
         .subgraph_store()
         .writable(LOGGER.clone(), deployment.id)
         .await
         .expect("can get writable")
-        .revert_block_operations(ptr.clone(), FirehoseCursor::None)
+        .revert_block_operations(ptr.clone(), FirehoseCursor::None, &stopwatch_metrics)
         .await
         .unwrap();
     flush(deployment).await.unwrap();

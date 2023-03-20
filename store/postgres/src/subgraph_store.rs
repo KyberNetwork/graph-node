@@ -16,8 +16,8 @@ use graph::{
     components::{
         server::index_node::VersionInfo,
         store::{
-            self, BlockStore, DeploymentLocator, DeploymentSchemaVersion,
-            EnsLookup as EnsLookupTrait, PruneReporter, SubgraphFork,
+            self, BlockStore, DeploymentId as GraphDeploymentId, DeploymentLocator,
+            DeploymentSchemaVersion, EnsLookup as EnsLookupTrait, PruneReporter, SubgraphFork,
         },
     },
     constraint_violation,
@@ -27,7 +27,7 @@ use graph::{
     prelude::{
         anyhow, futures03::future::join_all, lazy_static, o, web3::types::Address, ApiSchema,
         ApiVersion, BlockHash, BlockNumber, BlockPtr, ChainStore, DeploymentHash, EntityOperation,
-        Logger, MetricsRegistry, NodeId, PartialBlockPtr, Schema, StoreError,
+        Logger, MetricsRegistry, NodeId, PartialBlockPtr, Schema, StopwatchMetrics, StoreError,
         SubgraphDeploymentEntity, SubgraphName, SubgraphStore as SubgraphStoreTrait,
         SubgraphVersionSwitchingMode,
     },
@@ -276,6 +276,7 @@ pub struct SubgraphStoreInner {
     sender: Arc<NotificationSender>,
     writables: Mutex<HashMap<DeploymentId, Arc<WritableStore>>>,
     registry: Arc<dyn MetricsRegistry>,
+    logger: Logger,
 }
 
 impl SubgraphStoreInner {
@@ -325,6 +326,7 @@ impl SubgraphStoreInner {
         ));
         let sites = TimedCache::new(SITES_CACHE_TTL);
         SubgraphStoreInner {
+            logger: logger.to_owned(),
             mirror,
             stores,
             sites,
@@ -946,7 +948,15 @@ impl SubgraphStoreInner {
 
     pub fn rewind(&self, id: DeploymentHash, block_ptr_to: BlockPtr) -> Result<(), StoreError> {
         let (store, site) = self.store(&id)?;
-        let event = store.rewind(site, block_ptr_to)?;
+        // FIXME: this dummy stopwatch is VERY concerning
+        // -- Vu Tran --
+        let stopwatch = StopwatchMetrics::new(
+            self.logger.clone(),
+            &DeploymentLocator::new(GraphDeploymentId::new(-1), id, None),
+            "subgraph-store-rewind",
+            self.registry.clone(),
+        );
+        let event = store.rewind(site, block_ptr_to, &stopwatch)?;
         self.send_store_event(&event)
     }
 

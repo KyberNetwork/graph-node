@@ -124,7 +124,11 @@ where
                 let _outcome = self
                     .inputs
                     .store
-                    .unfail_deterministic_error(&current_ptr, &parent_ptr)
+                    .unfail_deterministic_error(
+                        &current_ptr,
+                        &parent_ptr,
+                        &self.metrics.subgraph.stopwatch,
+                    )
                     .await?;
             }
         }
@@ -937,11 +941,10 @@ where
         }
 
         info!(&self.logger, "Reverting block to get back to main chain"; "subgraph_ptr" => &subgraph_ptr, "revert_to_ptr" => &revert_to_ptr);
-
         if let Err(e) = self
             .inputs
             .store
-            .revert_block_operations(revert_to_ptr, cursor)
+            .revert_block_operations(revert_to_ptr, cursor, &self.metrics.subgraph.stopwatch)
             .await
         {
             error!(&self.logger, "Could not revert block. Retrying"; "error" => %e);

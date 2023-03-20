@@ -222,6 +222,7 @@ pub trait WritableStore: ReadStore {
         &self,
         block_ptr_to: BlockPtr,
         firehose_cursor: FirehoseCursor,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<(), StoreError>;
 
     /// If a deterministic error happened, this function reverts the block operations from the
@@ -230,6 +231,7 @@ pub trait WritableStore: ReadStore {
         &self,
         current_ptr: &BlockPtr,
         parent_ptr: &BlockPtr,
+        stopwatch: &StopwatchMetrics,
     ) -> Result<UnfailOutcome, StoreError>;
 
     /// If a non-deterministic error happened and the current deployment head is past the error

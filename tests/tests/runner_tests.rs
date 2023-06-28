@@ -136,6 +136,7 @@ async fn typename() -> anyhow::Result<()> {
     };
 
     let stop_block = blocks.last().unwrap().block.ptr();
+
     let chain = chain(blocks, &stores, None).await;
     let ctx = fixture::setup(subgraph_name.clone(), &hash, &stores, &chain, None, None).await;
 
@@ -429,6 +430,7 @@ async fn fatal_error() -> anyhow::Result<()> {
     };
 
     let stop_block = blocks.last().unwrap().block.ptr();
+
     let chain = chain(blocks, &stores, None).await;
     let ctx = fixture::setup(subgraph_name.clone(), &hash, &stores, &chain, None, None).await;
 

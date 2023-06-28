@@ -176,8 +176,7 @@ impl TriggersAdapterSelector<Chain> for EthereumAdapterSelector {
                 traces: false,
             };
 
-            self.adapters
-                .call_or_cheapest(Some(&adjusted_capabilities))?
+            self.adapters.cheapest_with(&adjusted_capabilities)?
         } else {
             self.adapters.cheapest_with(capabilities)?
         };

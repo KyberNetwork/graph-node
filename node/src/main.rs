@@ -1,5 +1,6 @@
 use clap::Parser as _;
 use ethereum::chain::{EthereumAdapterSelector, EthereumBlockRefetcher, EthereumStreamBuilder};
+use ethereum::codec::HeaderOnlyBlock;
 use ethereum::{
     BlockIngestor as EthereumBlockIngestor, EthereumAdapterTrait, EthereumNetworks, RuntimeAdapter,
 };
@@ -315,7 +316,7 @@ async fn main() {
                 // IS_FIREHOSE_PREFERRED is set to true, a chain will use firehose if it has
                 // endpoints set but chains are essentially guaranteed to use EITHER firehose or RPC
                 // but will never start both.
-                let (_firehose_eth_chains, polling_eth_chains): (HashMap<_, _>, HashMap<_, _>) =
+                let (firehose_eth_chains, polling_eth_chains): (HashMap<_, _>, HashMap<_, _>) =
                     ethereum_chains
                         .into_iter()
                         .partition(|(_, chain)| chain.is_firehose_supported());
@@ -326,6 +327,32 @@ async fn main() {
                     block_polling_interval,
                     polling_eth_chains,
                 );
+
+                firehose_networks_by_kind
+                    .get(&BlockchainKind::Ethereum)
+                    .map(|eth_firehose_endpoints| {
+                        start_firehose_block_ingestor::<_, HeaderOnlyBlock>(
+                            &logger,
+                            &network_store,
+                            firehose_eth_chains
+                                .into_iter()
+                                .map(|(name, chain)| {
+                                    let firehose_endpoints = eth_firehose_endpoints
+                                        .networks
+                                        .get(&name)
+                                        .expect(&format!("chain {} to have endpoints", name))
+                                        .clone();
+                                    (
+                                        name,
+                                        FirehoseChain {
+                                            chain,
+                                            firehose_endpoints,
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        )
+                    });
             }
 
             // Start a task runner
@@ -678,5 +705,67 @@ fn start_block_ingestor(
 
             // Run the Ethereum block ingestor in the background
             graph::spawn(block_ingestor.into_polling_stream());
+        });
+}
+
+#[derive(Clone)]
+struct FirehoseChain<C: Blockchain> {
+    chain: Arc<C>,
+    firehose_endpoints: FirehoseEndpoints,
+}
+
+fn start_firehose_block_ingestor<C, M>(
+    logger: &Logger,
+    store: &Store,
+    chains: HashMap<String, FirehoseChain<C>>,
+) where
+    C: Blockchain,
+    M: prost::Message + BlockchainBlock + Default + 'static,
+{
+    info!(
+        logger,
+        "Starting firehose block ingestors with {} chains [{}]",
+        chains.len(),
+        chains
+            .keys()
+            .map(|v| v.clone())
+            .collect::<Vec<String>>()
+            .join(", ")
+    );
+
+    // Create Firehose block ingestors and spawn a thread to run each
+    chains
+        .iter()
+        .for_each(|(network_name, chain)| {
+            info!(
+                logger,
+                "Starting firehose block ingestor for network";
+                "network_name" => &network_name
+            );
+
+            let endpoint = chain
+                .firehose_endpoints
+                .random()
+                .expect("One Firehose endpoint should exist at that execution point");
+
+            match store.block_store().chain_store(network_name.as_ref()) {
+                Some(s) => {
+                    let mut block_ingestor = FirehoseBlockIngestor::<M>::new(
+                        s,
+                        endpoint.clone(),
+                        logger.new(o!("component" => "FirehoseBlockIngestor", "provider" => endpoint.provider.clone())),
+                    );
+
+                    if C::KIND == BlockchainKind::Ethereum {
+                        block_ingestor = block_ingestor.with_transforms(vec![Transforms::EthereumHeaderOnly]);
+                    }
+
+                    // Run the Firehose block ingestor in the background
+                    graph::spawn(block_ingestor.run());
+                },
+                None => {
+                    error!(logger, "Not starting firehose block ingestor (no chain store available)"; "network_name" => &network_name);
+                }
+            }
         });
 }

@@ -22,6 +22,7 @@ use graph::data_source::{
 use graph::env::EnvVars;
 use graph::prelude::*;
 use graph::util::{backoff::ExponentialBackoff, lfu_cache::LfuCache};
+use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -618,6 +619,54 @@ where
     C: Blockchain,
     T: RuntimeHostBuilder<C>,
 {
+    async fn force_manual_revert(&mut self, cursor: FirehoseCursor) -> Result<bool, Error> {
+        let manual_revert = env::var("MANUAL_REVERT")
+            .map(|v| {
+                v.split(',')
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|s| String::from(*s))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or(Vec::new());
+
+        if manual_revert.len() < 3 {
+            return Ok(false);
+        }
+
+        let subgraph_id = manual_revert[0].to_owned();
+        let current_subgraph = self.ctx.instance.subgraph_id.to_string();
+        if subgraph_id != current_subgraph {
+            return Ok(false);
+        }
+        warn!(
+            &self.logger,
+            "--------- Request force revert for subgraph: {}!", subgraph_id
+        );
+        let try_block_number = manual_revert[1].parse::<i32>();
+        let try_block_hash = BlockHash::try_from(manual_revert[2].as_str());
+
+        // clear env because this is meant to run only once!
+        env::set_var("MANUAL_REVERT", "");
+
+        match (try_block_number, try_block_hash) {
+            (Ok(block_number), Ok(block_hash)) => {
+                warn!(
+                    &self.logger,
+                    "--------- FORCE MANUAL REVERT ---------";
+                    "subgraph" => subgraph_id,
+                    "number" => block_number,
+                    "hash" => block_hash.to_string(),
+                );
+                self.handle_revert(BlockPtr::new(block_hash, block_number), cursor)
+                    .await?;
+                info!(&self.logger, "------ MANUAL REVERT FINISHED -------");
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     async fn handle_stream_event(
         &mut self,
         event: Option<Result<BlockStreamEvent<C>, CancelableError<Error>>>,
@@ -625,8 +674,13 @@ where
     ) -> Result<Action, Error> {
         let action = match event {
             Some(Ok(BlockStreamEvent::ProcessBlock(block, cursor))) => {
-                self.handle_process_block(block, cursor, cancel_handle)
-                    .await?
+                let has_force_revert = self.force_manual_revert(cursor.clone()).await?;
+                if !has_force_revert {
+                    self.handle_process_block(block, cursor, cancel_handle)
+                        .await?
+                } else {
+                    Action::Restart
+                }
             }
             Some(Ok(BlockStreamEvent::Revert(revert_to_ptr, cursor))) => {
                 self.handle_revert(revert_to_ptr, cursor).await?

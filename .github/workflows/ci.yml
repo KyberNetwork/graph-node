@@ -38,7 +38,7 @@ jobs:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld -D warnings"
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
 
       - name: Install lld
@@ -76,7 +76,7 @@ jobs:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld -D warnings"
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
 
       - name: Install lld
@@ -99,11 +99,11 @@ jobs:
       RUSTFLAGS: "-C link-arg=-fuse-ld=lld -D warnings"
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
 
       - name: Install Node 14
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: "14"
           cache: yarn
@@ -148,7 +148,7 @@ jobs:
     env:
       RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Check formatting
         uses: actions-rs/cargo@v1
@@ -182,7 +182,7 @@ jobs:
     env:
       RUSTFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         run: |
